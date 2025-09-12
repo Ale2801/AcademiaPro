@@ -1,0 +1,65 @@
+:root{
+  --hero-bg-start: #eef2ff;
+  --hero-bg-end: #ffffff;
+  --blob-1: radial-gradient(closest-side, rgba(59,130,246,.35), rgba(59,130,246,0) 70%);
+  --blob-2: radial-gradient(closest-side, rgba(99,102,241,.30), rgba(99,102,241,0) 70%);
+}
+
+/* Adaptación a modo oscuro (Mantine añade data-mantine-color-scheme) */
+:root[data-mantine-color-scheme='dark']{
+  --hero-bg-start: #0f172a; /* slate-900 */
+  --hero-bg-end: #0b1220;   /* tono más profundo */
+  --blob-1: radial-gradient(closest-side, rgba(99,102,241,.22), rgba(99,102,241,0) 70%);
+  --blob-2: radial-gradient(closest-side, rgba(59,130,246,.20), rgba(59,130,246,0) 70%);
+}
+
+.lp-hero{
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--hero-bg-start) 0%, var(--hero-bg-end) 100%);
+}
+.lp-hero::before, .lp-hero::after{
+  content:"";
+  position:absolute; filter: blur(40px); transform: translate(-50%, -50%);
+}
+.lp-hero::before{ width: 480px; height: 480px; left: 15%; top: 10%; background: var(--blob-1); animation: lp-blob-a 18s ease-in-out infinite; }
+.lp-hero::after{ width: 520px; height: 520px; left: 85%; top: 25%; background: var(--blob-2); animation: lp-blob-b 22s ease-in-out infinite; }
+
+@keyframes lp-blob-a {
+  0%   { transform: translate(-50%, -50%) translateY(0) scale(1); }
+  50%  { transform: translate(-50%, -50%) translateY(-8px) scale(1.03); }
+  100% { transform: translate(-50%, -50%) translateY(0) scale(1); }
+}
+
+@keyframes lp-blob-b {
+  0%   { transform: translate(-50%, -50%) translateX(0) scale(1); }
+  50%  { transform: translate(-50%, -50%) translateX(-10px) scale(1.02); }
+  100% { transform: translate(-50%, -50%) translateX(0) scale(1); }
+}
+
+.lp-section-title{ letter-spacing: -.02em; }
+
+.lp-card{ transition: transform .2s ease, box-shadow .2s ease; }
+.lp-card:hover{ transform: translateY(-4px); box-shadow: 0 10px 30px rgba(2,6,23,.08); }
+
+.lp-pricing .mantine-Paper-root{ transition: transform .2s ease, box-shadow .2s ease; }
+.lp-pricing .mantine-Paper-root:hover{ transform: translateY(-6px); box-shadow: 0 16px 40px rgba(2,6,23,.10); }
+
+.lp-footer{ backdrop-filter: saturate(140%) blur(6px); }
+
+/* Botones del héroe con mejor contraste en dark */
+[data-mantine-color-scheme='dark'] .lp-hero .mantine-Button-root.mantine-Button-filled{
+  background-color: #3b82f6; /* blue-500 */
+  color: #fff;
+}
+[data-mantine-color-scheme='dark'] .lp-hero .mantine-Button-root.mantine-Button-filled:hover{
+  background-color: #2563eb; /* blue-600 */
+}
+[data-mantine-color-scheme='dark'] .lp-hero .mantine-Button-root.mantine-Button-outline{
+  border-color: rgba(148,163,184,.6); /* slate-400 */
+  color: #e2e8f0; /* slate-200 */
+}
+
+/* Utilidad de tarjetas con leve elevación usada en dashboards */
+.hover-card{ transition: transform .15s ease, box-shadow .15s ease; }
+.hover-card:hover{ transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.08); }

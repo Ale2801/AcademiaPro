@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: academiapro
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://app:app@db:5432/academiapro
+      SECRET_KEY: dev-secret-key-change
+      DEBUG: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+volumes:
+  db_data:
