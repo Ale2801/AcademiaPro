@@ -5,6 +5,12 @@ Backend FastAPI + Frontend React (Vite) con optimización de horarios.
 ## Backend
   - docker compose up -d
   - API: http://localhost:8000
+  - Seed automático: al iniciar la API se crean datos demo (admin/admin123, catálogos básicos). Para resembrar manualmente usa:
+
+    ```bash
+    cd backend
+    python -m src.seed
+    ```
   - Docs: http://localhost:8000/docs
   - docker compose exec -T api python -m pytest -q
 

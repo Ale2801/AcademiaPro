@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
-from .seed import ensure_default_admin
+from .seed import ensure_default_admin, ensure_demo_data
 from .routers import auth, students
 from .routers import schedule, teachers, subjects, rooms, courses, users
 from .routers import enrollments, evaluations, grades, attendance, timeslots, course_schedules, programs
@@ -14,6 +14,7 @@ async def lifespan(app: FastAPI):
     # Startup
     init_db()
     ensure_default_admin()
+    ensure_demo_data()
     yield
     # Shutdown
 
