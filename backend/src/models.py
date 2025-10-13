@@ -79,13 +79,31 @@ class User(SQLModel, table=True):
     emergency_contact_phone: Optional[str] = None
 
 
+class Program(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, unique=True)
+    name: str
+    level: Optional[str] = Field(default=None, description="undergrad/postgrad/secondary/technical")
+    duration_semesters: Optional[int] = None
+    description: Optional[str] = None
+
+
+class ProgramSemester(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id", index=True)
+    semester_number: int = Field(description="Número secuencial del semestre dentro del programa")
+    label: Optional[str] = Field(default=None, description="Etiqueta legible del semestre")
+    description: Optional[str] = None
+    is_active: bool = Field(default=True)
+
+
 class Student(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     enrollment_year: int
     # Información académica adicional
     registration_number: Optional[str] = Field(default=None, unique=False, index=True)
-    program_id: Optional[int] = Field(default=None, foreign_key="program.id")
+    program_id: int = Field(foreign_key="program.id")
     grade_level: Optional[str] = Field(default=None, description="Grado/curso actual (si aplica)")
     section: Optional[str] = None
     modality: Optional[ModalityEnum] = Field(default=None, sa_column_kwargs={"nullable": True})
@@ -139,6 +157,7 @@ class Course(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     subject_id: int = Field(foreign_key="subject.id")
     teacher_id: int = Field(foreign_key="teacher.id")
+    program_semester_id: int = Field(foreign_key="programsemester.id", index=True)
     term: str = Field(index=True)  # e.g., 2025-2
     group: str = Field(default="A")  # section/group
     weekly_hours: int = Field(default=3)
@@ -205,12 +224,4 @@ class CourseSchedule(SQLModel, table=True):
     course_id: int = Field(foreign_key="course.id")
     room_id: int = Field(foreign_key="room.id")
     timeslot_id: int = Field(foreign_key="timeslot.id")
-
-
-class Program(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    code: str = Field(index=True, unique=True)
-    name: str
-    level: Optional[str] = Field(default=None, description="undergrad/postgrad/secondary/technical")
-    duration_semesters: Optional[int] = None
-    description: Optional[str] = None
+    program_semester_id: int = Field(foreign_key="programsemester.id", index=True)

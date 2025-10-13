@@ -3,7 +3,7 @@ from typing import List
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Student, User
+from ..models import Student, User, Program
 from ..security import require_roles
 
 
@@ -17,6 +17,9 @@ def list_students(session=Depends(get_session), user=Depends(require_roles("admi
 
 @router.post("/", response_model=Student)
 def create_student(student: Student, session=Depends(get_session), user=Depends(require_roles("admin"))):
+    program = session.get(Program, student.program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Programa no encontrado")
     session.add(student)
     session.commit()
     session.refresh(student)
@@ -36,7 +39,12 @@ def update_student(student_id: int, payload: Student, session=Depends(get_sessio
     obj = session.get(Student, student_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "program_id" in data:
+        program = session.get(Program, data["program_id"])
+        if not program:
+            raise HTTPException(status_code=404, detail="Programa no encontrado")
+    for k, v in data.items():
         setattr(obj, k, v)
     session.add(obj)
     session.commit()
