@@ -7,12 +7,14 @@ export type ScheduleEntry = {
   course_id: number
   course_name?: string | null
   subject_name?: string | null
+  room_id?: number | null
   room_code?: string | null
   day_of_week?: number | null
   start_time?: string | null
   end_time?: string | null
   teacher_name?: string | null
   timeslot_id?: number | null
+  program_semester_id?: number | null
 }
 
 const DAY_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
