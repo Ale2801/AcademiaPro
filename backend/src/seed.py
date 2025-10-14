@@ -14,6 +14,7 @@ from .models import (
     EnrollmentStatusEnum,
     ModalityEnum,
     Program,
+    ProgramSemester,
     Room,
     RoomTypeEnum,
     Student,
@@ -63,11 +64,12 @@ def ensure_demo_data() -> None:
         ensure_default_admin(session)
 
         program_map = _ensure_programs(session)
+        semester_map = _ensure_program_semesters(session, program_map)
         subject_map = _ensure_subjects(session, program_map)
         teacher_map = _ensure_teachers(session)
         room_map = _ensure_rooms(session)
         timeslot_map = _ensure_timeslots(session)
-        course_map = _ensure_courses(session, subject_map, teacher_map)
+        course_map = _ensure_courses(session, subject_map, teacher_map, semester_map)
         _ensure_course_schedules(session, course_map, room_map, timeslot_map)
         student_map = _ensure_students(session, program_map)
         enrollment_map = _ensure_enrollments(session, student_map, course_map)
@@ -173,6 +175,22 @@ def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[
             "hours_per_week": 4,
         },
         {
+            "code": "BD301",
+            "name": "Bases de Datos Avanzadas",
+            "credits": 5,
+            "program_code": "ING-SIS",
+            "description": "Modelado relacional, SQL avanzado y tuning.",
+            "hours_per_week": 4,
+        },
+        {
+            "code": "SIS320",
+            "name": "Sistemas Operativos",
+            "credits": 4,
+            "program_code": "ING-SIS",
+            "description": "Procesos, concurrencia y administración de recursos.",
+            "hours_per_week": 4,
+        },
+        {
             "code": "ADM120",
             "name": "Contabilidad Gerencial",
             "credits": 4,
@@ -181,11 +199,43 @@ def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[
             "hours_per_week": 3,
         },
         {
+            "code": "ADM210",
+            "name": "Marketing Estratégico",
+            "credits": 4,
+            "program_code": "ADM-EMP",
+            "description": "Segmentación, posicionamiento y campañas digitales.",
+            "hours_per_week": 3,
+        },
+        {
+            "code": "ADM315",
+            "name": "Gestión de Proyectos",
+            "credits": 5,
+            "program_code": "ADM-EMP",
+            "description": "Metodologías ágiles, PMO y control de costos.",
+            "hours_per_week": 4,
+        },
+        {
             "code": "DS501",
             "name": "Machine Learning Aplicado",
             "credits": 5,
             "program_code": "DS-AV",
             "description": "Modelos supervisados, pipelines y ML Ops.",
+            "hours_per_week": 4,
+        },
+        {
+            "code": "DS510",
+            "name": "Visualización de Datos",
+            "credits": 3,
+            "program_code": "DS-AV",
+            "description": "Narrativas visuales y dashboards interactivos.",
+            "hours_per_week": 3,
+        },
+        {
+            "code": "DS530",
+            "name": "Ingeniería de Datos",
+            "credits": 4,
+            "program_code": "DS-AV",
+            "description": "ETL, orquestación y pipelines en la nube.",
             "hours_per_week": 4,
         },
     ]
@@ -226,6 +276,38 @@ def _ensure_teachers(session: Session) -> Dict[str, Teacher]:
             "department": "Ciencias de la Computación",
             "specialty": "Arquitectura de Software",
             "office": "C-210",
+        },
+        {
+            "email": "docente3@academiapro.dev",
+            "full_name": "Andrea Ruiz",
+            "password": "teacher123",
+            "department": "Matemáticas",
+            "specialty": "Probabilidad",
+            "office": "B-205",
+        },
+        {
+            "email": "docente4@academiapro.dev",
+            "full_name": "Sergio Pineda",
+            "password": "teacher123",
+            "department": "Ciencias de la Computación",
+            "specialty": "Ciberseguridad",
+            "office": "C-108",
+        },
+        {
+            "email": "docente5@academiapro.dev",
+            "full_name": "Jimena Castro",
+            "password": "teacher123",
+            "department": "Administración",
+            "specialty": "Finanzas corporativas",
+            "office": "D-402",
+        },
+        {
+            "email": "docente6@academiapro.dev",
+            "full_name": "Rafael Ortega",
+            "password": "teacher123",
+            "department": "Ciencia de Datos",
+            "specialty": "Big Data",
+            "office": "CI-102",
         },
     ]
 
@@ -280,6 +362,31 @@ def _ensure_rooms(session: Session) -> Dict[str, Room]:
             "room_type": RoomTypeEnum.auditorium,
             "has_projector": True,
         },
+        {
+            "code": "B-105",
+            "capacity": 45,
+            "building": "Edificio B",
+            "campus": "Campus Central",
+            "room_type": RoomTypeEnum.classroom,
+            "has_projector": True,
+        },
+        {
+            "code": "C-301",
+            "capacity": 30,
+            "building": "Edificio C",
+            "campus": "Campus Central",
+            "room_type": RoomTypeEnum.classroom,
+            "has_projector": True,
+        },
+        {
+            "code": "LAB-DATA",
+            "capacity": 28,
+            "building": "Centro de Datos",
+            "campus": "Campus Tecnológico",
+            "room_type": RoomTypeEnum.lab,
+            "has_projector": True,
+            "has_computers": True,
+        },
     ]
     mapping: Dict[str, Room] = {}
     for item in data:
@@ -294,10 +401,17 @@ def _ensure_rooms(session: Session) -> Dict[str, Room]:
 
 
 def _ensure_timeslots(session: Session) -> Dict[str, Timeslot]:
+    slot_templates = [
+        (time(8, 0), time(9, 30)),
+        (time(9, 45), time(11, 15)),
+        (time(11, 30), time(13, 0)),
+        (time(14, 0), time(15, 30)),
+        (time(15, 45), time(17, 15)),
+    ]
     data = [
-        {"day_of_week": 0, "start_time": time(8, 0), "end_time": time(9, 30)},
-        {"day_of_week": 2, "start_time": time(10, 0), "end_time": time(11, 30)},
-        {"day_of_week": 4, "start_time": time(14, 0), "end_time": time(16, 0)},
+        {"day_of_week": day, "start_time": start, "end_time": end}
+        for day in range(5)
+        for start, end in slot_templates
     ]
     mapping: Dict[str, Timeslot] = {}
     for item in data:
@@ -320,10 +434,37 @@ def _ensure_timeslots(session: Session) -> Dict[str, Timeslot]:
     return mapping
 
 
+def _ensure_program_semesters(session: Session, program_map: Dict[str, Program]) -> Dict[str, ProgramSemester]:
+    mapping: Dict[str, ProgramSemester] = {}
+    for program_code, program in program_map.items():
+        total_semesters = program.duration_semesters or 8
+        # Limitar la cantidad inicial para no sobrepoblar; mínimo 4 semestres.
+        for number in range(1, min(total_semesters, 6) + 1):
+            existing = session.exec(
+                select(ProgramSemester).where(
+                    ProgramSemester.program_id == program.id,
+                    ProgramSemester.semester_number == number,
+                )
+            ).first()
+            if not existing:
+                existing = ProgramSemester(
+                    program_id=program.id,
+                    semester_number=number,
+                    label=f"Semestre {number}",
+                    is_active=True,
+                )
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
+            mapping[f"{program_code}:{number}"] = existing
+    return mapping
+
+
 def _ensure_courses(
     session: Session,
     subject_map: Dict[str, Subject],
     teacher_map: Dict[str, Teacher],
+    semester_map: Dict[str, ProgramSemester],
 ) -> Dict[str, Course]:
     data = [
         {
@@ -335,6 +476,20 @@ def _ensure_courses(
             "weekly_hours": 5,
             "capacity": 40,
             "modality": ModalityEnum.in_person,
+            "program_code": "ING-SIS",
+            "semester_number": 1,
+        },
+        {
+            "key": "MAT101-2025-1-B",
+            "subject_code": "MAT101",
+            "teacher_email": "docente3@academiapro.dev",
+            "term": "2025-1",
+            "group": "B",
+            "weekly_hours": 5,
+            "capacity": 40,
+            "modality": ModalityEnum.in_person,
+            "program_code": "ING-SIS",
+            "semester_number": 1,
         },
         {
             "key": "PRO201-2025-1-A",
@@ -345,6 +500,20 @@ def _ensure_courses(
             "weekly_hours": 4,
             "capacity": 35,
             "modality": ModalityEnum.hybrid,
+            "program_code": "ING-SIS",
+            "semester_number": 2,
+        },
+        {
+            "key": "PRO201-2025-1-B",
+            "subject_code": "PRO201",
+            "teacher_email": "docente4@academiapro.dev",
+            "term": "2025-1",
+            "group": "B",
+            "weekly_hours": 4,
+            "capacity": 35,
+            "modality": ModalityEnum.hybrid,
+            "program_code": "ING-SIS",
+            "semester_number": 2,
         },
         {
             "key": "ADM120-2025-1-A",
@@ -355,6 +524,32 @@ def _ensure_courses(
             "weekly_hours": 3,
             "capacity": 50,
             "modality": ModalityEnum.in_person,
+            "program_code": "ADM-EMP",
+            "semester_number": 1,
+        },
+        {
+            "key": "ADM210-2025-1-A",
+            "subject_code": "ADM210",
+            "teacher_email": "docente5@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 3,
+            "capacity": 45,
+            "modality": ModalityEnum.hybrid,
+            "program_code": "ADM-EMP",
+            "semester_number": 2,
+        },
+        {
+            "key": "ADM315-2025-1-A",
+            "subject_code": "ADM315",
+            "teacher_email": "docente5@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 4,
+            "capacity": 40,
+            "modality": ModalityEnum.in_person,
+            "program_code": "ADM-EMP",
+            "semester_number": 3,
         },
         {
             "key": "DS501-2025-1-A",
@@ -365,6 +560,56 @@ def _ensure_courses(
             "weekly_hours": 4,
             "capacity": 25,
             "modality": ModalityEnum.online,
+            "program_code": "DS-AV",
+            "semester_number": 1,
+        },
+        {
+            "key": "DS510-2025-1-A",
+            "subject_code": "DS510",
+            "teacher_email": "docente6@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 3,
+            "capacity": 25,
+            "modality": ModalityEnum.hybrid,
+            "program_code": "DS-AV",
+            "semester_number": 1,
+        },
+        {
+            "key": "DS530-2025-1-A",
+            "subject_code": "DS530",
+            "teacher_email": "docente6@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 4,
+            "capacity": 25,
+            "modality": ModalityEnum.hybrid,
+            "program_code": "DS-AV",
+            "semester_number": 2,
+        },
+        {
+            "key": "BD301-2025-1-A",
+            "subject_code": "BD301",
+            "teacher_email": "docente4@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 4,
+            "capacity": 30,
+            "modality": ModalityEnum.in_person,
+            "program_code": "ING-SIS",
+            "semester_number": 3,
+        },
+        {
+            "key": "SIS320-2025-1-A",
+            "subject_code": "SIS320",
+            "teacher_email": "docente3@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 4,
+            "capacity": 32,
+            "modality": ModalityEnum.in_person,
+            "program_code": "ING-SIS",
+            "semester_number": 3,
         },
     ]
 
@@ -372,7 +617,11 @@ def _ensure_courses(
     for item in data:
         subject = subject_map.get(item["subject_code"])
         teacher = teacher_map.get(item["teacher_email"])
+        semester_key = f"{item['program_code']}:{item['semester_number']}"
+        semester = semester_map.get(semester_key)
         if not subject or not teacher:
+            continue
+        if not semester:
             continue
 
         course = (
@@ -394,10 +643,15 @@ def _ensure_courses(
                 weekly_hours=item["weekly_hours"],
                 capacity=item["capacity"],
                 modality=item["modality"],
+                program_semester_id=semester.id,
             )
             session.add(course)
             session.commit()
             session.refresh(course)
+        elif course.program_semester_id != semester.id:
+            course.program_semester_id = semester.id
+            session.add(course)
+            session.commit()
         mapping[item["key"]] = course
     return mapping
 
@@ -410,8 +664,17 @@ def _ensure_course_schedules(
 ) -> None:
     data = [
         {"course_key": "MAT101-2025-1-A", "room_code": "A-201", "timeslot_key": "0-08:00"},
-        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "2-10:00"},
-        {"course_key": "ADM120-2025-1-A", "room_code": "AUD-1", "timeslot_key": "4-14:00"},
+        {"course_key": "MAT101-2025-1-B", "room_code": "B-105", "timeslot_key": "0-09:45"},
+        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "1-14:00"},
+        {"course_key": "PRO201-2025-1-B", "room_code": "LAB-IA", "timeslot_key": "3-09:45"},
+        {"course_key": "ADM120-2025-1-A", "room_code": "AUD-1", "timeslot_key": "2-11:30"},
+        {"course_key": "ADM210-2025-1-A", "room_code": "C-301", "timeslot_key": "1-08:00"},
+        {"course_key": "ADM315-2025-1-A", "room_code": "C-301", "timeslot_key": "4-14:00"},
+        {"course_key": "DS501-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "2-08:00"},
+        {"course_key": "DS510-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "1-11:30"},
+        {"course_key": "DS530-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "3-14:00"},
+        {"course_key": "BD301-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "2-14:00"},
+        {"course_key": "SIS320-2025-1-A", "room_code": "A-201", "timeslot_key": "4-08:00"},
     ]
 
     for item in data:
@@ -434,6 +697,7 @@ def _ensure_course_schedules(
                     course_id=course.id,
                     room_id=room.id,
                     timeslot_id=timeslot.id,
+                    program_semester_id=course.program_semester_id,
                 )
             )
             session.commit()
@@ -471,6 +735,96 @@ def _ensure_students(session: Session, program_map: Dict[str, Program]) -> Dict[
             "section": "A",
             "current_term": "2025-1",
         },
+        {
+            "email": "estudiante4@academiapro.dev",
+            "full_name": "Lucía Andrade",
+            "password": "student123",
+            "enrollment_year": 2023,
+            "program_code": "ING-SIS",
+            "registration_number": "2023-005",
+            "section": "B",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante5@academiapro.dev",
+            "full_name": "Jorge Morales",
+            "password": "student123",
+            "enrollment_year": 2021,
+            "program_code": "ADM-EMP",
+            "registration_number": "2021-022",
+            "section": "A",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante6@academiapro.dev",
+            "full_name": "Paula Rivas",
+            "password": "student123",
+            "enrollment_year": 2024,
+            "program_code": "DS-AV",
+            "registration_number": "2024-012",
+            "section": "A",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante7@academiapro.dev",
+            "full_name": "Mateo Calderón",
+            "password": "student123",
+            "enrollment_year": 2022,
+            "program_code": "ING-SIS",
+            "registration_number": "2022-030",
+            "section": "C",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante8@academiapro.dev",
+            "full_name": "Anaís Herrera",
+            "password": "student123",
+            "enrollment_year": 2023,
+            "program_code": "ADM-EMP",
+            "registration_number": "2023-018",
+            "section": "B",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante9@academiapro.dev",
+            "full_name": "Gabriel Soto",
+            "password": "student123",
+            "enrollment_year": 2021,
+            "program_code": "ING-SIS",
+            "registration_number": "2021-011",
+            "section": "A",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante10@academiapro.dev",
+            "full_name": "Rebeca Lozano",
+            "password": "student123",
+            "enrollment_year": 2022,
+            "program_code": "DS-AV",
+            "registration_number": "2022-027",
+            "section": "B",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante11@academiapro.dev",
+            "full_name": "Héctor Vidal",
+            "password": "student123",
+            "enrollment_year": 2024,
+            "program_code": "ADM-EMP",
+            "registration_number": "2024-006",
+            "section": "A",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante12@academiapro.dev",
+            "full_name": "Sofía Beltrán",
+            "password": "student123",
+            "enrollment_year": 2023,
+            "program_code": "DS-AV",
+            "registration_number": "2023-020",
+            "section": "C",
+            "current_term": "2025-1",
+        },
     ]
 
     mapping: Dict[str, Student] = {}
@@ -485,6 +839,8 @@ def _ensure_students(session: Session, program_map: Dict[str, Program]) -> Dict[
         student = session.exec(select(Student).where(Student.user_id == user.id)).first()
         if not student:
             program = program_map.get(item["program_code"])
+            if not program:
+                continue
             student = Student(
                 user_id=user.id,
                 enrollment_year=item["enrollment_year"],
@@ -498,6 +854,12 @@ def _ensure_students(session: Session, program_map: Dict[str, Program]) -> Dict[
             session.add(student)
             session.commit()
             session.refresh(student)
+        elif student.program_id is None:
+            program = program_map.get(item["program_code"])
+            if program:
+                student.program_id = program.id
+                session.add(student)
+                session.commit()
         mapping[item["email"]] = student
     return mapping
 
@@ -507,11 +869,25 @@ def _ensure_enrollments(
     student_map: Dict[str, Student],
     course_map: Dict[str, Course],
 ) -> Dict[str, Enrollment]:
+    enrollment_plan = {
+        "estudiante1@academiapro.dev": ["MAT101-2025-1-A", "PRO201-2025-1-A", "BD301-2025-1-A"],
+        "estudiante2@academiapro.dev": ["ADM120-2025-1-A", "ADM210-2025-1-A"],
+        "estudiante3@academiapro.dev": ["DS501-2025-1-A", "DS530-2025-1-A"],
+        "estudiante4@academiapro.dev": ["MAT101-2025-1-B", "SIS320-2025-1-A"],
+        "estudiante5@academiapro.dev": ["ADM210-2025-1-A", "ADM315-2025-1-A"],
+        "estudiante6@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A"],
+        "estudiante7@academiapro.dev": ["MAT101-2025-1-A", "PRO201-2025-1-B"],
+        "estudiante8@academiapro.dev": ["ADM120-2025-1-A", "ADM315-2025-1-A"],
+        "estudiante9@academiapro.dev": ["MAT101-2025-1-B", "BD301-2025-1-A", "SIS320-2025-1-A"],
+        "estudiante10@academiapro.dev": ["DS501-2025-1-A", "DS510-2025-1-A"],
+        "estudiante11@academiapro.dev": ["ADM210-2025-1-A", "ADM315-2025-1-A"],
+        "estudiante12@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A", "PRO201-2025-1-B"],
+    }
+
     data = [
-        {"student_email": "estudiante1@academiapro.dev", "course_key": "MAT101-2025-1-A"},
-        {"student_email": "estudiante1@academiapro.dev", "course_key": "PRO201-2025-1-A"},
-        {"student_email": "estudiante2@academiapro.dev", "course_key": "ADM120-2025-1-A"},
-        {"student_email": "estudiante3@academiapro.dev", "course_key": "DS501-2025-1-A"},
+        {"student_email": email, "course_key": course_key}
+        for email, courses in enrollment_plan.items()
+        for course_key in courses
     ]
 
     mapping: Dict[str, Enrollment] = {}

@@ -8,7 +8,7 @@ import { vi } from 'vitest'
 vi.mock('../lib/api', () => ({
   api: {
     post: vi.fn(() => Promise.resolve({ data: {} })),
-    get: vi.fn(() => Promise.resolve({ data: {} })),
+    get: vi.fn(() => Promise.resolve({ data: [] })),
     defaults: { headers: { common: {} } },
   },
   setAuth: () => {},
@@ -22,7 +22,7 @@ function renderWithRouter(ui: React.ReactElement) {
       <MemoryRouter initialEntries={['/']}>
         <Routes>
           <Route path="/" element={ui} />
-          <Route path="/dashboard/admin" element={<div>Admin Dashboard</div>} />
+          <Route path="/dashboard/admin" element={<div>Panel de Administrador</div>} />
           <Route path="/dashboard/teacher" element={<div>Teacher Dashboard</div>} />
           <Route path="/dashboard/student" element={<div>Student Dashboard</div>} />
         </Routes>
@@ -51,7 +51,7 @@ describe('App', () => {
   renderWithRouter(<App />)
   fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
     // Redirige a /dashboard/admin
-    await waitFor(() => expect(screen.getByText(/Admin Dashboard/i)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Panel de Administrador/i)).toBeInTheDocument())
     expect(api.post).toHaveBeenCalledWith('/auth/token', expect.any(URLSearchParams), expect.any(Object))
   })
 })

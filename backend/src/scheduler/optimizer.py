@@ -33,6 +33,7 @@ class Constraints:
     teacher_availability: Dict[int, List[int]]  # teacher_id -> allowed timeslot_ids
     room_allowed: Optional[Dict[int, List[int]]] = None  # room_id -> allowed timeslot_ids
     max_consecutive_blocks: int = 3
+    min_gap_blocks: int = 0
 
 
 def solve_schedule(courses: List[CourseInput], rooms: List[RoomInput], timeslots: List[TimeslotInput], cons: Constraints) -> List[Tuple[int, int, int]]:
@@ -89,6 +90,33 @@ def _solve_cp_sat(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]
                     for ci, _ in enumerate(courses):
                         model.Add(x[(ci, r, t)] == 0)
 
+    # Enforce minimum gaps between clases for each teacher per day
+    if cons.min_gap_blocks > 0:
+        slots_by_day: Dict[int, List[TimeslotInput]] = {}
+        for slot in timeslots:
+            slots_by_day.setdefault(slot.day, []).append(slot)
+
+        for day, slot_list in slots_by_day.items():
+            ordered = sorted(slot_list, key=lambda s: s.block)
+            for idx in range(len(ordered)):
+                current = ordered[idx]
+                for next_idx in range(idx + 1, len(ordered)):
+                    nxt = ordered[next_idx]
+                    block_diff = nxt.block - current.block
+                    if block_diff == 0:
+                        continue
+                    if block_diff <= cons.min_gap_blocks:
+                        t1 = current.timeslot_id
+                        t2 = nxt.timeslot_id
+                        for teacher_id, course_indexes in teacher_to_idx.items():
+                            model.Add(
+                                sum(x[(ci, r, t1)] for ci in course_indexes for r in R)
+                                + sum(x[(ci, r, t2)] for ci in course_indexes for r in R)
+                                <= 1
+                            )
+                    else:
+                        break
+
     # Soft constraint: limit consecutive blocks per course per day
     # We approximate by discouraging 4+ consecutive via minimization
     obj_terms = []
@@ -133,6 +161,8 @@ def _solve_greedy(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]
     used_rt = set()
     T = [t.timeslot_id for t in timeslots]
     teacher_busy = {c.teacher_id: set() for c in courses}
+    teacher_day_blocks: Dict[int, Dict[int, List[int]]] = {c.teacher_id: {} for c in courses}
+    slot_lookup: Dict[int, TimeslotInput] = {t.timeslot_id: t for t in timeslots}
     for c in courses:
         allowed_t = cons.teacher_availability.get(c.teacher_id, T)
         assigned = 0
@@ -142,6 +172,14 @@ def _solve_greedy(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]
             # avoid teacher double booking
             if t in teacher_busy[c.teacher_id]:
                 continue
+            meta = slot_lookup.get(t)
+            if not meta:
+                continue
+            if cons.min_gap_blocks > 0:
+                day_blocks = teacher_day_blocks[c.teacher_id].setdefault(meta.day, [])
+                violates = any(abs(meta.block - existing) <= cons.min_gap_blocks for existing in day_blocks)
+                if violates:
+                    continue
             # find free room
             for r in rooms:
                 if (r.room_id, t) in used_rt:
@@ -151,6 +189,7 @@ def _solve_greedy(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]
                 out.append((c.course_id, r.room_id, t))
                 used_rt.add((r.room_id, t))
                 teacher_busy[c.teacher_id].add(t)
+                teacher_day_blocks[c.teacher_id].setdefault(meta.day, []).append(meta.block)
                 assigned += 1
                 break
     return out

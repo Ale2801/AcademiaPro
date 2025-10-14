@@ -8,8 +8,19 @@ type AuthState = {
   logout: () => void
 }
 
+const initialToken = (() => {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const stored = localStorage.getItem('authToken') || undefined
+    if (stored) setAuth(stored)
+    return stored
+  } catch {
+    return undefined
+  }
+})()
+
 export const useAuth = create<AuthState>((set) => ({
-  token: undefined,
+  token: initialToken,
   async login(email, password) {
     const params = new URLSearchParams()
     params.set('grant_type', 'password')
