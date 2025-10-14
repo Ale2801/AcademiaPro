@@ -9,12 +9,10 @@ import {
   Button,
   Card,
   Center,
-  CloseButton,
   Checkbox,
   Divider,
   Group,
   Loader,
-  SegmentedControl,
   ScrollArea,
   Select,
   SimpleGrid,
@@ -32,11 +30,7 @@ import {
   IconCalendarEvent,
   IconChalkboard,
   IconClockHour4,
-  IconCalendarCog,
-  IconFilter,
   IconClipboardList,
-  IconArrowsSort,
-  IconSearch,
   IconDatabase,
   IconPencil,
   IconRefresh,
@@ -45,7 +39,6 @@ import {
   IconUsersGroup,
 } from '@tabler/icons-react'
 import { api } from '../lib/api'
-import SchedulePlanner from './components/SchedulePlanner'
 
 type Field = {
   name: string
@@ -129,8 +122,6 @@ function buildSchema(fields: Field[]) {
 
 function endpointFor(fieldName: string): string | undefined {
   switch (fieldName) {
-    case 'user_id':
-      return '/users/'
     case 'program_id':
       return '/programs/'
     case 'subject_id':
@@ -145,18 +136,14 @@ function endpointFor(fieldName: string): string | undefined {
       return '/rooms/'
     case 'timeslot_id':
       return '/timeslots/'
-    case 'program_semester_id':
-      return '/program-semesters/'
     default:
       return undefined
   }
 }
 
 function labelForOption(item: any): string {
-  const primary = item?.name || item?.full_name || item?.label || item?.code || item?.email
-  const secondary = item?.semester_number ? `Sem ${item.semester_number}` : item?.level
+  const primary = item?.name || item?.full_name || item?.code || item?.email
   if (!primary) return String(item?.id ?? '')
-  if (secondary) return `${item.id} — ${primary} (${secondary})`
   return `${item.id} — ${primary}`
 }
 
@@ -167,26 +154,6 @@ function CrudSection({ section }: { section: Section }) {
   const [loading, setLoading] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [selectOptions, setSelectOptions] = useState<Record<string, { value: string; label: string }[]>>({})
-  const [filterQuery, setFilterQuery] = useState('')
-  const [sortColumn, setSortColumn] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
-
-  const columns = useMemo(() => {
-    if (items.length === 0) return []
-    return Object.keys(items[0])
-  }, [items])
-
-  const emptyFormValues = useMemo(() => {
-    const defaults: Record<string, any> = {}
-    for (const field of section.fields) {
-      if (field.type === 'checkbox') {
-        defaults[field.name] = false
-      } else {
-        defaults[field.name] = ''
-      }
-    }
-    return defaults
-  }, [section.fields])
 
   const schema = useMemo(() => {
     let base: z.ZodTypeAny = buildSchema(section.fields)
@@ -224,12 +191,6 @@ function CrudSection({ section }: { section: Section }) {
   useEffect(() => {
     void load()
   }, [load])
-
-  useEffect(() => {
-    if (sortColumn && !columns.includes(sortColumn)) {
-      setSortColumn(null)
-    }
-  }, [columns, sortColumn])
 
   useEffect(() => {
     let cancelled = false
@@ -276,7 +237,7 @@ function CrudSection({ section }: { section: Section }) {
         setSuccess('Creado correctamente')
       }
       setEditingId(null)
-      reset({ ...emptyFormValues })
+      reset({})
       await load()
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'Error al guardar'
@@ -302,51 +263,10 @@ function CrudSection({ section }: { section: Section }) {
     }
   }, [load, section.endpoint])
 
-  const filteredAndSortedItems = useMemo(() => {
-    const normalizedQuery = filterQuery.trim().toLowerCase()
-    let data = items
-    if (normalizedQuery) {
-      data = data.filter((row) =>
-        columns.some((column) => {
-          const value = row[column]
-          if (value === null || value === undefined) return false
-          if (typeof value === 'object') {
-            return JSON.stringify(value).toLowerCase().includes(normalizedQuery)
-          }
-          return String(value).toLowerCase().includes(normalizedQuery)
-        })
-      )
-    }
-
-    if (sortColumn) {
-      const directionMultiplier = sortDirection === 'asc' ? 1 : -1
-      data = [...data].sort((a, b) => {
-        const aValue = a[sortColumn]
-        const bValue = b[sortColumn]
-        if (aValue === bValue) return 0
-
-        const parseValue = (value: any) => {
-          if (value === null || value === undefined) return ''
-          if (typeof value === 'number') return value
-          if (typeof value === 'string') return value.toLowerCase()
-          if (typeof value === 'boolean') return value ? 1 : 0
-          if (value instanceof Date) return value.getTime()
-          return JSON.stringify(value).toLowerCase()
-        }
-
-        const aParsed = parseValue(aValue)
-        const bParsed = parseValue(bValue)
-
-        if (typeof aParsed === 'number' && typeof bParsed === 'number') {
-          return (aParsed - bParsed) * directionMultiplier
-        }
-
-        return String(aParsed).localeCompare(String(bParsed)) * directionMultiplier
-      })
-    }
-
-    return data
-  }, [columns, filterQuery, items, sortColumn, sortDirection])
+  const columns = useMemo(() => {
+    if (items.length === 0) return []
+    return Object.keys(items[0])
+  }, [items])
 
   return (
     <Stack gap="xl">
@@ -446,7 +366,7 @@ function CrudSection({ section }: { section: Section }) {
                   variant="subtle"
                   color="gray"
                   onClick={() => {
-                    reset({ ...emptyFormValues })
+                    reset({})
                     setEditingId(null)
                     setError(undefined)
                     setSuccess(undefined)
@@ -470,10 +390,7 @@ function CrudSection({ section }: { section: Section }) {
               </Text>
             </div>
             <Group gap="xs" align="center">
-              <Badge color="indigo" variant="light">
-                {filteredAndSortedItems.length}
-                {items.length !== filteredAndSortedItems.length ? ` / ${items.length}` : ''} registros
-              </Badge>
+              <Badge color="indigo" variant="light">{items.length} registros</Badge>
               <Tooltip label="Actualizar" withArrow>
                 <ActionIcon variant="light" color="indigo" onClick={() => load()} aria-label="Actualizar registros">
                   <IconRefresh size={16} />
@@ -482,43 +399,6 @@ function CrudSection({ section }: { section: Section }) {
             </Group>
           </Group>
           <Divider />
-
-          <Stack gap="sm">
-            <Group justify="space-between" align="flex-end" gap="sm" wrap="wrap">
-              <TextInput
-                label="Buscar"
-                placeholder="Filtra por cualquier columna"
-                leftSection={<IconSearch size={16} />}
-                value={filterQuery}
-                onChange={(event) => setFilterQuery(event.currentTarget.value)}
-                style={{ flex: '1 1 220px', maxWidth: 320 }}
-                rightSection={filterQuery ? <CloseButton aria-label="Limpiar filtro" onClick={() => setFilterQuery('')} /> : undefined}
-              />
-              {columns.length > 0 && (
-                <Group gap="xs" wrap="wrap" align="flex-end">
-                  <Select
-                    label="Ordenar por"
-                    placeholder="Selecciona columna"
-                    data={columns.map((column) => ({ value: column, label: column.replace(/_/g, ' ') }))}
-                    value={sortColumn}
-                    onChange={(value) => setSortColumn(value || null)}
-                    leftSection={<IconArrowsSort size={16} />}
-                    clearable
-                    style={{ flex: '1 1 180px', maxWidth: 220 }}
-                  />
-                  <SegmentedControl
-                    value={sortDirection}
-                    onChange={(val) => setSortDirection(val as 'asc' | 'desc')}
-                    data={[
-                      { label: 'Asc', value: 'asc' },
-                      { label: 'Desc', value: 'desc' },
-                    ]}
-                    disabled={!sortColumn}
-                  />
-                </Group>
-              )}
-            </Group>
-          </Stack>
 
           {loading ? (
             <Center py="xl">
@@ -529,101 +409,69 @@ function CrudSection({ section }: { section: Section }) {
               <IconDatabase size={32} color="var(--mantine-color-gray-5)" />
               <Text c="dimmed" ta="center">No hay registros disponibles. Crea el primero usando el formulario superior.</Text>
             </Stack>
-          ) : filteredAndSortedItems.length === 0 ? (
-            <Stack align="center" gap="xs" py="xl">
-              <IconFilter size={32} color="var(--mantine-color-gray-5)" />
-              <Text c="dimmed" ta="center">No encontramos coincidencias con los filtros aplicados.</Text>
-              <Button variant="subtle" size="xs" onClick={() => { setFilterQuery(''); setSortColumn(null); }}>
-                Limpiar filtros
-              </Button>
-            </Stack>
           ) : (
-            <ScrollArea.Autosize offsetScrollbars mah="60vh" type="always" scrollbarSize={10}>
-              <div style={{ minWidth: 720, width: '100%', overflowX: 'auto' }}>
-                <Table
-                  verticalSpacing="sm"
-                  horizontalSpacing="md"
-                  striped
-                  highlightOnHover
-                  withTableBorder
-                  style={{ tableLayout: 'fixed', minWidth: '100%' }}
-                >
-                  <Table.Thead>
-                    <Table.Tr>
-                      {columns.map((column) => (
-                        <Table.Th key={column} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {column}
-                        </Table.Th>
-                      ))}
-                      <Table.Th style={{ width: 120, whiteSpace: 'nowrap' }}>Acciones</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {filteredAndSortedItems.map((row) => (
-                      <Table.Tr key={row.id ?? `${section.key}-${JSON.stringify(row)}`}>
-                        {columns.map((column) => {
-                          const value = row[column]
-                          if (value === null || value === undefined) return <Table.Td key={column}>—</Table.Td>
-                          if (typeof value === 'object') return <Table.Td key={column}>{labelForOption(value)}</Table.Td>
-                          return (
-                            <Table.Td
-                              key={column}
-                              style={{
-                                wordBreak: 'break-word',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                maxWidth: 200,
-                              }}
-                              title={String(value)}
-                            >
-                              {String(value)}
-                            </Table.Td>
-                          )
-                        })}
-                        <Table.Td>
-                          <Group gap="xs">
-                            <Tooltip label="Editar" withArrow>
-                              <ActionIcon
-                                variant="subtle"
-                                color="dark"
-                                aria-label="Editar"
-                                onClick={() => {
-                                  const values: Record<string, any> = {}
-                                  for (const field of section.fields) {
-                                    let value = row[field.name]
-                                    if (value === null || value === undefined) continue
-                                    if (field.type === 'time' && typeof value === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(value)) {
-                                      value = value.slice(0, 5)
-                                    }
-                                    values[field.name] = selectOptions[field.name] ? String(value) : value
-                                  }
-                                  reset(values)
-                                  setEditingId(row.id ?? null)
-                                  setError(undefined)
-                                  setSuccess(undefined)
-                                }}
-                              >
-                                <IconPencil size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                            <Tooltip label="Eliminar" withArrow>
-                              <ActionIcon
-                                variant="subtle"
-                                color="red"
-                                aria-label="Eliminar"
-                                onClick={() => row.id !== undefined && onDelete(row.id)}
-                              >
-                                <IconTrash size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </Group>
-                        </Table.Td>
-                      </Table.Tr>
+            <ScrollArea offsetScrollbars>
+              <Table miw={720} verticalSpacing="sm" horizontalSpacing="md" striped highlightOnHover withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    {columns.map((column) => (
+                      <Table.Th key={column}>{column}</Table.Th>
                     ))}
-                  </Table.Tbody>
-                </Table>
-              </div>
-            </ScrollArea.Autosize>
+                    <Table.Th style={{ width: 120 }}>Acciones</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {items.map((row) => (
+                    <Table.Tr key={row.id ?? `${section.key}-${JSON.stringify(row)}`}> 
+                      {columns.map((column) => {
+                        const value = row[column]
+                        if (value === null || value === undefined) return <Table.Td key={column}>—</Table.Td>
+                        if (typeof value === 'object') return <Table.Td key={column}>{labelForOption(value)}</Table.Td>
+                        return <Table.Td key={column}>{String(value)}</Table.Td>
+                      })}
+                      <Table.Td>
+                        <Group gap="xs">
+                          <Tooltip label="Editar" withArrow>
+                            <ActionIcon
+                              variant="subtle"
+                              color="dark"
+                              aria-label="Editar"
+                              onClick={() => {
+                                const values: Record<string, any> = {}
+                                for (const field of section.fields) {
+                                  let value = row[field.name]
+                                  if (value === null || value === undefined) continue
+                                  if (field.type === 'time' && typeof value === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(value)) {
+                                    value = value.slice(0, 5)
+                                  }
+                                  values[field.name] = selectOptions[field.name] ? String(value) : value
+                                }
+                                reset(values)
+                                setEditingId(row.id ?? null)
+                                setError(undefined)
+                                setSuccess(undefined)
+                              }}
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="Eliminar" withArrow>
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              aria-label="Eliminar"
+                              onClick={() => row.id !== undefined && onDelete(row.id)}
+                            >
+                              <IconTrash size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
           )}
         </Stack>
       </Card>
@@ -632,7 +480,7 @@ function CrudSection({ section }: { section: Section }) {
 }
 
 export function Admin() {
-  const crudSections: Section[] = useMemo(() => ([
+  const sections: Section[] = useMemo(() => ([
     {
       key: 'programs',
       title: 'Programas',
@@ -648,20 +496,6 @@ export function Admin() {
       ],
     },
     {
-      key: 'program_semesters',
-      title: 'Semestres de Programa',
-      description: 'Organiza los semestres asociados a cada programa académico.',
-      endpoint: '/program-semesters/',
-      icon: IconCalendarEvent,
-      fields: [
-        { name: 'program_id', type: 'number', required: true, label: 'Programa' },
-        { name: 'semester_number', type: 'number', required: true, label: 'Número de semestre' },
-        { name: 'label', type: 'text', label: 'Etiqueta' },
-        { name: 'description', type: 'text', label: 'Descripción' },
-        { name: 'is_active', type: 'checkbox', label: 'Activo' },
-      ],
-    },
-    {
       key: 'students',
       title: 'Estudiantes',
       description: 'Alta y vinculación de estudiantes con su cohorte y programa.',
@@ -670,18 +504,7 @@ export function Admin() {
       fields: [
         { name: 'user_id', type: 'number', required: true, label: 'Usuario' },
         { name: 'enrollment_year', type: 'number', required: true, label: 'Año de ingreso' },
-        { name: 'registration_number', type: 'text', label: 'Matrícula' },
-        { name: 'program_id', type: 'number', required: true, label: 'Programa' },
-        { name: 'grade_level', type: 'text', label: 'Grado/Nivel' },
-        { name: 'section', type: 'text', label: 'Sección' },
-        { name: 'modality', type: 'text', label: 'Modalidad', placeholder: 'in_person / online / hybrid' },
-        { name: 'status', type: 'text', label: 'Estado', placeholder: 'active / suspended / graduated / withdrawn' },
-        { name: 'admission_date', type: 'date', label: 'Fecha de admisión' },
-        { name: 'expected_graduation_date', type: 'date', label: 'Fecha graduación estimada' },
-        { name: 'gpa', type: 'number', label: 'GPA' },
-        { name: 'current_term', type: 'text', label: 'Periodo actual' },
-        { name: 'guardian_name', type: 'text', label: 'Apoderado' },
-        { name: 'guardian_phone', type: 'text', label: 'Teléfono apoderado' },
+        { name: 'program_id', type: 'number', label: 'Programa' },
       ],
     },
     {
@@ -693,12 +516,6 @@ export function Admin() {
       fields: [
         { name: 'user_id', type: 'number', required: true, label: 'Usuario' },
         { name: 'department', type: 'text', label: 'Departamento' },
-        { name: 'phone', type: 'text', label: 'Teléfono' },
-        { name: 'hire_date', type: 'date', label: 'Fecha de contratación' },
-        { name: 'employment_type', type: 'text', label: 'Tipo de contrato', placeholder: 'full_time / part_time / contract' },
-        { name: 'office', type: 'text', label: 'Oficina' },
-        { name: 'specialty', type: 'text', label: 'Especialidad' },
-        { name: 'bio', type: 'text', label: 'Bio' },
       ],
     },
     {
@@ -712,10 +529,6 @@ export function Admin() {
         { name: 'name', type: 'text', required: true, label: 'Nombre' },
         { name: 'credits', type: 'number', required: true, label: 'Créditos' },
         { name: 'program_id', type: 'number', label: 'Programa' },
-        { name: 'description', type: 'text', label: 'Descripción' },
-        { name: 'department', type: 'text', label: 'Departamento' },
-        { name: 'level', type: 'text', label: 'Nivel' },
-        { name: 'hours_per_week', type: 'number', label: 'Horas por semana' },
       ],
     },
     {
@@ -728,12 +541,6 @@ export function Admin() {
         { name: 'code', type: 'text', required: true, label: 'Código' },
         { name: 'capacity', type: 'number', required: true, label: 'Capacidad' },
         { name: 'building', type: 'text', label: 'Edificio' },
-        { name: 'campus', type: 'text', label: 'Campus' },
-        { name: 'floor', type: 'text', label: 'Piso' },
-        { name: 'room_type', type: 'text', label: 'Tipo de sala', placeholder: 'classroom / lab / auditorium / office' },
-        { name: 'has_projector', type: 'checkbox', label: 'Tiene proyector' },
-        { name: 'has_computers', type: 'checkbox', label: 'Tiene computadores' },
-        { name: 'notes', type: 'text', label: 'Notas' },
       ],
     },
     {
@@ -745,17 +552,9 @@ export function Admin() {
       fields: [
         { name: 'subject_id', type: 'number', required: true, label: 'Asignatura' },
         { name: 'teacher_id', type: 'number', required: true, label: 'Profesor' },
-        { name: 'program_semester_id', type: 'number', required: true, label: 'Semestre de programa' },
         { name: 'term', type: 'text', required: true, label: 'Periodo', placeholder: '2025-2' },
         { name: 'group', type: 'text', label: 'Grupo', placeholder: 'A' },
         { name: 'weekly_hours', type: 'number', label: 'Horas semanales' },
-        { name: 'capacity', type: 'number', label: 'Capacidad' },
-        { name: 'language', type: 'text', label: 'Idioma' },
-        { name: 'modality', type: 'text', label: 'Modalidad', placeholder: 'in_person / online / hybrid' },
-        { name: 'start_date', type: 'date', label: 'Fecha de inicio' },
-        { name: 'end_date', type: 'date', label: 'Fecha de término' },
-        { name: 'syllabus_url', type: 'text', label: 'URL syllabus' },
-        { name: 'location_notes', type: 'text', label: 'Notas ubicación' },
       ],
     },
     {
@@ -768,8 +567,6 @@ export function Admin() {
         { name: 'day_of_week', type: 'number', required: true, label: 'Día (0-6)', placeholder: '0=Lunes' },
         { name: 'start_time', type: 'time', required: true, label: 'Hora inicio' },
         { name: 'end_time', type: 'time', required: true, label: 'Hora fin' },
-        { name: 'campus', type: 'text', label: 'Campus' },
-        { name: 'comment', type: 'text', label: 'Comentario' },
       ],
     },
     {
@@ -793,10 +590,6 @@ export function Admin() {
       fields: [
         { name: 'student_id', type: 'number', required: true, label: 'Estudiante' },
         { name: 'course_id', type: 'number', required: true, label: 'Curso' },
-        { name: 'status', type: 'text', label: 'Estado', placeholder: 'enrolled / dropped / completed / failed / withdrawn' },
-        { name: 'final_grade', type: 'number', label: 'Nota final' },
-        { name: 'dropped_at', type: 'text', label: 'Fecha de retiro', placeholder: 'YYYY-MM-DDTHH:MM:SS' },
-        { name: 'notes', type: 'text', label: 'Notas' },
       ],
     },
     {
@@ -809,10 +602,6 @@ export function Admin() {
         { name: 'course_id', type: 'number', required: true, label: 'Curso' },
         { name: 'name', type: 'text', required: true, label: 'Nombre' },
         { name: 'weight', type: 'number', required: true, label: 'Ponderación' },
-        { name: 'scheduled_at', type: 'text', label: 'Programado para', placeholder: 'YYYY-MM-DDTHH:MM:SS' },
-        { name: 'max_score', type: 'number', label: 'Puntaje máximo' },
-        { name: 'due_date', type: 'text', label: 'Fecha límite', placeholder: 'YYYY-MM-DDTHH:MM:SS' },
-        { name: 'description', type: 'text', label: 'Descripción' },
       ],
     },
     {
@@ -825,8 +614,6 @@ export function Admin() {
         { name: 'enrollment_id', type: 'number', required: true, label: 'Matrícula' },
         { name: 'evaluation_id', type: 'number', required: true, label: 'Evaluación' },
         { name: 'score', type: 'number', required: true, label: 'Nota' },
-        { name: 'graded_at', type: 'text', label: 'Calificado en', placeholder: 'YYYY-MM-DDTHH:MM:SS' },
-        { name: 'feedback', type: 'text', label: 'Retroalimentación' },
       ],
     },
     {
@@ -839,22 +626,18 @@ export function Admin() {
         { name: 'enrollment_id', type: 'number', required: true, label: 'Matrícula' },
         { name: 'session_date', type: 'date', required: true, label: 'Fecha' },
         { name: 'present', type: 'checkbox', label: 'Presente' },
-        { name: 'arrival_time', type: 'time', label: 'Hora de llegada' },
-        { name: 'notes', type: 'text', label: 'Notas' },
       ],
     },
   ]), [])
 
-  const plannerTabKey = 'planner'
-  const [active, setActive] = useState(crudSections[0].key)
-  const current = crudSections.find((section) => section.key === active)
-  const isPlanner = active === plannerTabKey
+  const [active, setActive] = useState(sections[0].key)
+  const current = sections.find((section) => section.key === active)!
 
   const quickStats = useMemo(() => ([
-    { label: 'Catálogos activos', value: crudSections.length, hint: 'Dominios conectados', icon: IconDatabase },
+    { label: 'Catálogos activos', value: sections.length, hint: 'Dominios conectados', icon: IconDatabase },
     { label: 'Último refresh', value: 'Hace 5 min', hint: 'Sincronización API estable', icon: IconRefresh },
     { label: 'Tareas pendientes', value: '3', hint: 'Solicitudes de actualización', icon: IconClipboardList },
-  ]), [crudSections.length])
+  ]), [sections.length])
 
   return (
     <Stack gap="xl">
@@ -888,19 +671,16 @@ export function Admin() {
       <Card withBorder radius="lg" padding="md" style={{ background: 'rgba(15, 23, 42, 0.85)', color: 'white' }}>
         <Tabs value={active} onChange={(value) => value && setActive(value)} variant="pills" radius="md" keepMounted={false}>
           <Tabs.List style={{ flexWrap: 'wrap', gap: 8 }}>
-            {crudSections.map((section) => (
+            {sections.map((section) => (
               <Tabs.Tab key={section.key} value={section.key} leftSection={<section.icon size={16} />}> 
                 {section.title}
               </Tabs.Tab>
             ))}
-            <Tabs.Tab value={plannerTabKey} leftSection={<IconCalendarCog size={16} />}>
-              Planificador de horarios
-            </Tabs.Tab>
           </Tabs.List>
         </Tabs>
       </Card>
 
-  {isPlanner ? <SchedulePlanner /> : current && <CrudSection section={current} />}
+      <CrudSection section={current} />
     </Stack>
   )
 }
