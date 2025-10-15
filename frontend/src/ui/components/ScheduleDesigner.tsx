@@ -231,6 +231,13 @@ function AssignmentCard({
               <IconMapPin size={14} />
               <Text size="xs">{assignment.room_code ?? 'Sala por definir'}</Text>
             </Group>
+                      <Group gap={6} align="center">
+                        <IconClockHour3 size={14} />
+                        <Text size="xs">
+                          {formatRange(assignment.start_time ?? null, assignment.end_time ?? null)}
+                          {assignment.duration_minutes ? ` · ${formatHoursCompact(assignment.duration_minutes / 60)}` : ''}
+                        </Text>
+                      </Group>
           </Stack>
           <Group gap={4} wrap="nowrap">
             <ActionIcon

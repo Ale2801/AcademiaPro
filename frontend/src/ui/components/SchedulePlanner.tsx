@@ -101,10 +101,37 @@ type Assignment = {
   course_id: number
   room_id: number
   timeslot_id: number
+  duration_minutes?: number
+  start_offset_minutes?: number
+}
+
+type RoomSegment = {
+  start: number
+  end: number
+  assignmentId?: number | null
+}
+
+type RoomAllocation = {
+  total: number
+  segments: RoomSegment[]
+}
+
+type OptimizerAssignment = {
+  course_id: number
+  room_id: number
+  timeslot_id: number
+  duration_minutes: number
+  start_offset_minutes: number
+}
+
+type OptimizerUnassigned = {
+  course_id: number
+  remaining_minutes: number
 }
 
 type OptimizerResponse = {
-  assignments: [number, number, number][]
+  assignments: OptimizerAssignment[]
+  unassigned?: OptimizerUnassigned[]
 }
 
 type PlannerDialog =
@@ -125,6 +152,14 @@ function timeStringToMinutes(value?: string | null): number | null {
   return hours * 60 + minutes + seconds / 60
 }
 
+function minutesToTimeString(totalMinutes: number | null): string | null {
+  if (totalMinutes == null || Number.isNaN(totalMinutes)) return null
+  const minutesNormalized = ((Math.floor(totalMinutes) % (24 * 60)) + 24 * 60) % (24 * 60)
+  const hours = Math.floor(minutesNormalized / 60)
+  const minutes = minutesNormalized % 60
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+}
+
 function durationInHours(start?: string | null, end?: string | null): number {
   const startMinutes = timeStringToMinutes(start)
   const endMinutes = timeStringToMinutes(end)
@@ -132,6 +167,18 @@ function durationInHours(start?: string | null, end?: string | null): number {
   const diff = endMinutes - startMinutes
   if (diff <= 0) return 0
   return diff / 60
+}
+
+function formatMinutesLabel(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0m'
+  const minutes = Math.round(value)
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours}h`)
+  if (remainder > 0) parts.push(`${remainder}m`)
+  if (parts.length === 0) return '0m'
+  return parts.join(' ')
 }
 
 export default function SchedulePlanner() {
@@ -166,6 +213,10 @@ export default function SchedulePlanner() {
   const [dialog, setDialog] = useState<PlannerDialog | null>(null)
   const [dialogRoom, setDialogRoom] = useState<string | null>(null)
   const [dialogTimeslot, setDialogTimeslot] = useState<string | null>(null)
+  const [dialogDuration, setDialogDuration] = useState<number | null>(null)
+  const [dialogOffset, setDialogOffset] = useState<number | null>(null)
+  const [dialogError, setDialogError] = useState<string | null>(null)
+  const [dialogManualAdjust, setDialogManualAdjust] = useState(false)
 
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user.full_name])), [users])
   const subjectMap = useMemo(() => new Map(subjects.map((subject) => [subject.id, subject.name])), [subjects])
@@ -354,12 +405,24 @@ export default function SchedulePlanner() {
     return map
   }, [timeslots])
 
+  const timeslotDurationMinutesMap = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const [id, hours] of timeslotDurationMap.entries()) {
+      map.set(id, Math.round(hours * 60))
+    }
+    return map
+  }, [timeslotDurationMap])
+
   const assignmentHours = useMemo(() => {
     const map = new Map<number, number>()
     for (const entry of schedule) {
-      let hours = entry.timeslot_id != null ? timeslotDurationMap.get(entry.timeslot_id) ?? 0 : 0
-      if ((hours == null || hours <= 0) && (entry.start_time || entry.end_time)) {
+      let hours = 0
+      if (entry.duration_minutes != null && entry.duration_minutes > 0) {
+        hours = entry.duration_minutes / 60
+      } else if (entry.start_time || entry.end_time) {
         hours = durationInHours(entry.start_time ?? null, entry.end_time ?? null)
+      } else if (entry.timeslot_id != null) {
+        hours = timeslotDurationMap.get(entry.timeslot_id) ?? 0
       }
       if (hours == null || hours <= 0) continue
       map.set(entry.course_id, (map.get(entry.course_id) ?? 0) + hours)
@@ -397,6 +460,14 @@ export default function SchedulePlanner() {
       }
     })
   }, [courses, subjectMap, teacherMap, userMap, assignmentHours])
+
+  const courseSummaryMap = useMemo(() => {
+    const map = new Map<number, (typeof courseSummaries)[number]>()
+    for (const summary of courseSummaries) {
+      map.set(summary.id, summary)
+    }
+    return map
+  }, [courseSummaries])
 
   const buildTimeslotBlocks = useCallback(() => {
     const dayBuckets = new Map<number, Timeslot[]>()
@@ -447,10 +518,130 @@ export default function SchedulePlanner() {
       map.set(key, bucket)
     }
     for (const [, list] of map) {
-      list.sort((a, b) => (a.room_code ?? '').localeCompare(b.room_code ?? ''))
+      list.sort((a, b) => {
+        const roomCompare = (a.room_code ?? '').localeCompare(b.room_code ?? '')
+        if (roomCompare !== 0) return roomCompare
+        const offsetA = a.start_offset_minutes ?? Math.max(
+          (timeStringToMinutes(a.start_time) ?? 0) - (timeStringToMinutes(a.start_time && a.timeslot_id != null ? timeslotMap.get(a.timeslot_id)?.start_time : undefined) ?? 0),
+          0,
+        )
+        const offsetB = b.start_offset_minutes ?? Math.max(
+          (timeStringToMinutes(b.start_time) ?? 0) - (timeStringToMinutes(b.start_time && b.timeslot_id != null ? timeslotMap.get(b.timeslot_id)?.start_time : undefined) ?? 0),
+          0,
+        )
+        if (offsetA !== offsetB) return offsetA - offsetB
+        const startLabelA = a.start_time ?? ''
+        const startLabelB = b.start_time ?? ''
+        if (startLabelA !== startLabelB) return startLabelA.localeCompare(startLabelB)
+        return (a.course_name ?? '').localeCompare(b.course_name ?? '')
+      })
     }
     return map
-  }, [schedule])
+  }, [schedule, timeslotMap])
+
+  const roomAllocationMap = useMemo(() => {
+    const map = new Map<string, RoomAllocation>()
+    for (const entry of schedule) {
+      if (entry.timeslot_id == null || entry.room_id == null) continue
+      const slot = timeslotMap.get(entry.timeslot_id)
+      if (!slot) continue
+      const total = timeslotDurationMinutesMap.get(entry.timeslot_id) ?? Math.round(durationInHours(slot.start_time, slot.end_time) * 60)
+      if (!Number.isFinite(total) || total <= 0) continue
+      const slotStartMinutes = timeStringToMinutes(slot.start_time) ?? 0
+      let offsetMinutes = entry.start_offset_minutes ?? null
+      if (offsetMinutes == null && entry.start_time) {
+        const entryStart = timeStringToMinutes(entry.start_time)
+        if (entryStart != null) {
+          offsetMinutes = Math.max(Math.round(entryStart - slotStartMinutes), 0)
+        }
+      }
+      const start = Math.max(0, Math.min(offsetMinutes ?? 0, total))
+      let duration = entry.duration_minutes ?? null
+      if ((duration == null || duration <= 0) && entry.start_time && entry.end_time) {
+        const entryStart = timeStringToMinutes(entry.start_time)
+        const entryEnd = timeStringToMinutes(entry.end_time)
+        if (entryStart != null && entryEnd != null) {
+          duration = Math.max(Math.round(entryEnd - entryStart), 0)
+        }
+      }
+      if (duration == null || duration <= 0) {
+        duration = total
+      }
+      const end = Math.max(start, Math.min(start + duration, total))
+      const key = `${entry.room_id}-${entry.timeslot_id}`
+      const allocation = map.get(key) ?? { total, segments: [] }
+      allocation.total = total
+      allocation.segments.push({ start, end, assignmentId: entry.id ?? null })
+      map.set(key, allocation)
+    }
+    for (const allocation of map.values()) {
+      allocation.segments.sort((a, b) => a.start - b.start)
+    }
+    return map
+  }, [schedule, timeslotMap, timeslotDurationMinutesMap])
+
+  const getRoomAvailability = useCallback(
+    (roomId: number | null, timeslotId: number | null, ignoreAssignmentId?: number | null) => {
+      if (roomId == null || timeslotId == null) return null
+      const total = timeslotDurationMinutesMap.get(timeslotId) ?? 0
+      if (!Number.isFinite(total) || total <= 0) {
+        return { total: 0, freeSegments: [], usedSegments: [] }
+      }
+      const key = `${roomId}-${timeslotId}`
+      const allocation = roomAllocationMap.get(key)
+      const segments = allocation?.segments ?? []
+      const filtered = segments.filter((segment) => segment.assignmentId !== (ignoreAssignmentId ?? null))
+      filtered.sort((a, b) => a.start - b.start)
+      const freeSegments: { start: number; end: number }[] = []
+      let cursor = 0
+      for (const segment of filtered) {
+        if (segment.start > cursor) {
+          freeSegments.push({ start: cursor, end: segment.start })
+        }
+        cursor = Math.max(cursor, segment.end)
+      }
+      if (cursor < total) {
+        freeSegments.push({ start: cursor, end: total })
+      }
+      return { total, freeSegments, usedSegments: filtered }
+    },
+    [roomAllocationMap, timeslotDurationMinutesMap],
+  )
+
+  const computeEntryAllocation = useCallback(
+    (entry: ScheduleEntry, timeslotId: number | null) => {
+      if (timeslotId == null) {
+        return { offset: entry.start_offset_minutes ?? 0, duration: entry.duration_minutes ?? 0 }
+      }
+      const total = timeslotDurationMinutesMap.get(timeslotId) ?? 0
+      const slot = timeslotMap.get(timeslotId)
+      const slotStartMinutes = slot ? timeStringToMinutes(slot.start_time) ?? 0 : 0
+      let offset = entry.start_offset_minutes ?? null
+      if ((offset == null || offset < 0) && entry.start_time) {
+        const entryStart = timeStringToMinutes(entry.start_time)
+        if (entryStart != null) {
+          offset = Math.max(Math.round(entryStart - slotStartMinutes), 0)
+        }
+      }
+      let duration = entry.duration_minutes ?? null
+      if ((duration == null || duration <= 0) && entry.start_time && entry.end_time) {
+        const entryStart = timeStringToMinutes(entry.start_time)
+        const entryEnd = timeStringToMinutes(entry.end_time)
+        if (entryStart != null && entryEnd != null) {
+          duration = Math.max(Math.round(entryEnd - entryStart), 0)
+        }
+      }
+      if (duration == null || duration <= 0) {
+        duration = total
+      }
+      if (offset == null || offset < 0) {
+        offset = 0
+      }
+      const end = Math.max(offset, Math.min(offset + duration, total))
+      return { offset, duration: Math.max(end - offset, 0) }
+    },
+    [timeslotDurationMinutesMap, timeslotMap],
+  )
 
   const programOptions = useMemo(
     () =>
@@ -490,20 +681,164 @@ export default function SchedulePlanner() {
     if (!dialog) {
       setDialogRoom(null)
       setDialogTimeslot(null)
+      setDialogDuration(null)
+      setDialogOffset(null)
+      setDialogError(null)
       return
     }
+
+    const courseId = dialog.type === 'create' ? dialog.courseId : dialog.assignment.course_id
+
+    setDialogManualAdjust(false)
+
+    let inferredRoom: string | null = null
+    let inferredTimeslot: string | null = null
+
     if (dialog.type === 'create') {
       const existing = schedule.find((entry) => entry.course_id === dialog.courseId && entry.room_id)
-      const defaultRoom = existing?.room_id ? String(existing.room_id) : roomOptions[0]?.value ?? null
-      setDialogRoom(defaultRoom)
-      setDialogTimeslot(String(dialog.timeslotId))
+      inferredRoom = existing?.room_id ? String(existing.room_id) : roomOptions[0]?.value ?? null
+      inferredTimeslot = String(dialog.timeslotId)
     } else {
       const defaultRoom = dialog.assignment.room_id ? String(dialog.assignment.room_id) : roomOptions[0]?.value ?? null
+      inferredRoom = defaultRoom
       const targetTimeslot = dialog.targetTimeslotId ?? dialog.assignment.timeslot_id
-      setDialogRoom(defaultRoom)
-      setDialogTimeslot(targetTimeslot != null ? String(targetTimeslot) : null)
+      inferredTimeslot = targetTimeslot != null ? String(targetTimeslot) : null
     }
-  }, [dialog, roomOptions, schedule])
+
+    setDialogRoom(inferredRoom)
+    setDialogTimeslot(inferredTimeslot)
+
+    const roomIdNum = inferredRoom ? Number(inferredRoom) : null
+    const timeslotIdNum = inferredTimeslot ? Number(inferredTimeslot) : null
+    const assignmentId = dialog.type === 'edit' ? dialog.assignment.id ?? null : null
+
+    let durationCandidate: number | null = null
+    let offsetCandidate: number | null = null
+    let error: string | null = null
+
+    if (dialog.type === 'edit') {
+      const baseAllocation = computeEntryAllocation(dialog.assignment, timeslotIdNum)
+      durationCandidate = baseAllocation.duration
+      offsetCandidate = baseAllocation.offset
+    }
+
+    if (roomIdNum != null && timeslotIdNum != null) {
+      const availability = getRoomAvailability(roomIdNum, timeslotIdNum, assignmentId ?? null)
+      if (!availability) {
+        error = 'No se pudo calcular la disponibilidad del bloque.'
+      } else {
+        const gaps = availability.freeSegments
+        if (dialog.type === 'create') {
+          const summary = courseSummaryMap.get(courseId)
+          const remainingMinutes = summary ? Math.max(Math.round((summary.weeklyHours - summary.assignedHours) * 60), 0) : availability.total
+          const desiredDuration = remainingMinutes > 0 ? Math.min(remainingMinutes, availability.total) : availability.total
+          const firstGap = gaps.find((gap) => gap.end - gap.start > 0)
+          if (firstGap) {
+            offsetCandidate = firstGap.start
+            durationCandidate = Math.min(firstGap.end - firstGap.start, desiredDuration)
+          } else {
+            offsetCandidate = 0
+            durationCandidate = 0
+            error = 'El bloque seleccionado no tiene espacio disponible.'
+          }
+        } else {
+          if (durationCandidate == null || durationCandidate <= 0) {
+            durationCandidate = availability.total
+          }
+          if (offsetCandidate == null || offsetCandidate < 0) {
+            offsetCandidate = gaps[0]?.start ?? 0
+          }
+          const fits = gaps.some((gap) =>
+            offsetCandidate != null && durationCandidate != null
+              ? offsetCandidate >= gap.start && offsetCandidate + durationCandidate <= gap.end + 0.001
+              : false,
+          )
+          if (!fits) {
+            const matchingGap = gaps.find((gap) => durationCandidate != null && gap.end - gap.start >= durationCandidate)
+            if (matchingGap) {
+              offsetCandidate = matchingGap.start
+              durationCandidate = Math.min(durationCandidate ?? matchingGap.end - matchingGap.start, matchingGap.end - matchingGap.start)
+            } else if (gaps.length > 0) {
+              offsetCandidate = gaps[0].start
+              durationCandidate = gaps[0].end - gaps[0].start
+              error = 'Se ajustó la clase para caber en el espacio disponible.'
+            } else {
+              error = 'No hay espacio disponible en este bloque.'
+              durationCandidate = 0
+            }
+          }
+        }
+      }
+    }
+
+    setDialogDuration(durationCandidate != null ? Math.max(Math.round(durationCandidate), 0) : null)
+    setDialogOffset(offsetCandidate != null ? Math.max(Math.round(offsetCandidate), 0) : null)
+    setDialogError(error)
+  }, [dialog, schedule, roomOptions, computeEntryAllocation, getRoomAvailability, courseSummaryMap])
+
+  useEffect(() => {
+    if (!dialog) return
+    if (!dialogRoom || !dialogTimeslot) {
+      setDialogError('Selecciona una sala y bloque horario.')
+      return
+    }
+    const roomIdNum = Number(dialogRoom)
+    const timeslotIdNum = Number(dialogTimeslot)
+    const assignmentId = dialog.type === 'edit' ? dialog.assignment.id ?? null : null
+    const availability = getRoomAvailability(roomIdNum, timeslotIdNum, assignmentId ?? null)
+    if (!availability) {
+      setDialogError('No se pudo calcular la disponibilidad del bloque seleccionado.')
+      return
+    }
+    const gaps = availability.freeSegments
+    if (gaps.length === 0) {
+      setDialogError('No hay espacio disponible en este bloque para la sala seleccionada.')
+      if (!dialogManualAdjust) {
+        if (dialogOffset !== 0) setDialogOffset(0)
+        if (dialogDuration !== 0) setDialogDuration(0)
+      }
+      return
+    }
+
+    if (dialogDuration == null || dialogDuration <= 0 || dialogOffset == null || dialogOffset < 0) {
+      if (!dialogManualAdjust) {
+        const firstGap = gaps[0]
+        setDialogOffset(firstGap.start)
+        setDialogDuration(firstGap.end - firstGap.start)
+        setDialogManualAdjust(false)
+        setDialogError(null)
+      }
+      return
+    }
+
+    const fits = gaps.some((gap) => dialogOffset >= gap.start && dialogOffset + dialogDuration <= gap.end + 0.001)
+    if (fits) {
+      setDialogError(null)
+      return
+    }
+
+    const suitableGap = gaps.find((gap) => gap.end - gap.start >= dialogDuration)
+    if (!dialogManualAdjust && suitableGap) {
+      if (dialogOffset !== suitableGap.start) setDialogOffset(suitableGap.start)
+      if (dialogDuration > suitableGap.end - suitableGap.start) {
+        setDialogDuration(suitableGap.end - suitableGap.start)
+      }
+      setDialogManualAdjust(false)
+      setDialogError('Se ajustó la clase para caber en el espacio disponible.')
+      return
+    }
+
+    if (!dialogManualAdjust) {
+      const fallbackGap = gaps[0]
+      if (dialogOffset !== fallbackGap.start) setDialogOffset(fallbackGap.start)
+      if (dialogDuration !== fallbackGap.end - fallbackGap.start) setDialogDuration(fallbackGap.end - fallbackGap.start)
+      setDialogManualAdjust(false)
+      setDialogError('Se ajustó la clase para caber en el espacio disponible.')
+      return
+    }
+
+    setDialogError('La duración y posición seleccionadas no caben en este bloque. Ajusta los valores manualmente.')
+  }, [dialog, dialogRoom, dialogTimeslot, dialogDuration, dialogOffset, dialogManualAdjust, getRoomAvailability])
 
   const courseLookup = useMemo(() => {
     const map = new Map<number, { label: string; term?: string }>()
@@ -561,10 +896,12 @@ export default function SchedulePlanner() {
       }
 
       const { data } = await api.post<OptimizerResponse>('/schedule/optimize', payload)
-      const parsedAssignments: Assignment[] = data.assignments.map(([course_id, room_id, timeslot_id]) => ({
-        course_id,
-        room_id,
-        timeslot_id,
+      const parsedAssignments: Assignment[] = data.assignments.map((assignment) => ({
+        course_id: assignment.course_id,
+        room_id: assignment.room_id,
+        timeslot_id: assignment.timeslot_id,
+        duration_minutes: assignment.duration_minutes,
+        start_offset_minutes: assignment.start_offset_minutes,
       }))
       const preview: ScheduleEntry[] = parsedAssignments.map((assignment) => {
         const course = courseMap.get(assignment.course_id)
@@ -572,6 +909,13 @@ export default function SchedulePlanner() {
         const room = roomMap.get(assignment.room_id)
         const subjectName = course ? subjectMap.get(course.subject_id) : undefined
         const teacherName = course?.teacher_id ? userMap.get(teacherMap.get(course.teacher_id)?.user_id ?? 0) : null
+        const slotStartMinutes = timeslot ? timeStringToMinutes(timeslot.start_time) : null
+        const startOffset = assignment.start_offset_minutes ?? 0
+        const durationMinutes = assignment.duration_minutes ?? (timeslot ? Math.round(durationInHours(timeslot.start_time, timeslot.end_time) * 60) : 0)
+        const startMinutesAbsolute = slotStartMinutes != null ? slotStartMinutes + startOffset : null
+        const endMinutesAbsolute = startMinutesAbsolute != null ? startMinutesAbsolute + durationMinutes : timeStringToMinutes(timeslot?.end_time)
+        const startLabel = minutesToTimeString(startMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.start_time) : undefined)
+        const endLabel = minutesToTimeString(endMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.end_time) : undefined)
         return {
           course_id: assignment.course_id,
           course_name: subjectName
@@ -582,21 +926,34 @@ export default function SchedulePlanner() {
           room_code: room?.code,
           timeslot_id: assignment.timeslot_id,
           day_of_week: timeslot?.day_of_week,
-          start_time: timeslot ? timeLabel(timeslot.start_time) : undefined,
-          end_time: timeslot ? timeLabel(timeslot.end_time) : undefined,
+          start_time: startLabel ?? undefined,
+          end_time: endLabel ?? undefined,
           teacher_name: teacherName ?? undefined,
+          duration_minutes: durationMinutes,
+          start_offset_minutes: assignment.start_offset_minutes ?? 0,
         }
       })
       setOptimizerAssignments(parsedAssignments)
       setOptimizerPreview(preview)
-      setSuccess(`Optimización generó ${parsedAssignments.length} bloques sugeridos.`)
+      const unassigned = data.unassigned ?? []
+      if (unassigned.length > 0) {
+        const detail = unassigned
+          .map((item) => {
+            const courseLabel = courseLookup.get(item.course_id)?.label ?? `Curso #${item.course_id}`
+            return `${courseLabel}: ${formatMinutesLabel(item.remaining_minutes)}`
+          })
+          .join(', ')
+        setSuccess(`Optimización parcial: ${parsedAssignments.length} bloques sugeridos. Pendiente: ${detail}.`)
+      } else {
+        setSuccess(`Optimización generó ${parsedAssignments.length} bloques sugeridos.`)
+      }
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo optimizar el horario'
       setError(detail)
     } finally {
       setOptimizerLoading(false)
     }
-  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxConsecutiveBlocks, requireBreaks, courseMap, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
+  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxConsecutiveBlocks, requireBreaks, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
 
   const handleApplyOptimized = useCallback(async () => {
     if (optimizerAssignments.length === 0) return
@@ -676,36 +1033,13 @@ export default function SchedulePlanner() {
   }, [])
 
   const handleAssignmentDrop = useCallback(
-    async (assignmentId: number, timeslotId: number) => {
+    (assignmentId: number, timeslotId: number) => {
       const assignment = assignmentMap.get(assignmentId)
       if (!assignment) return
       if (assignment.timeslot_id === timeslotId) return
-      if (!assignment.room_id) {
-        setDialog({ type: 'edit', assignment, targetTimeslotId: timeslotId })
-        return
-      }
-      setSaving(true)
-      setError(null)
-      try {
-        await api.put(`/course-schedules/${assignmentId}`, {
-          course_id: assignment.course_id,
-          room_id: assignment.room_id,
-          timeslot_id: timeslotId,
-        })
-        if (selectedSemester) {
-          await loadSemesterData(Number(selectedSemester))
-        } else if (assignment.program_semester_id) {
-          await loadSemesterData(assignment.program_semester_id)
-        }
-        setSuccess('Bloque reubicado correctamente')
-      } catch (e: any) {
-        const detail = e?.response?.data?.detail || e?.message || 'No se pudo actualizar el bloque'
-        setError(detail)
-      } finally {
-        setSaving(false)
-      }
+      setDialog({ type: 'edit', assignment, targetTimeslotId: timeslotId })
     },
-    [assignmentMap, loadSemesterData, selectedSemester],
+    [assignmentMap],
   )
 
   const handleAssignmentEdit = useCallback((assignment: ScheduleEntry) => {
@@ -739,7 +1073,13 @@ export default function SchedulePlanner() {
     [loadSemesterData, selectedSemester],
   )
 
-  const closeDialog = () => setDialog(null)
+  const closeDialog = () => {
+    setDialog(null)
+    setDialogDuration(null)
+    setDialogOffset(null)
+    setDialogError(null)
+    setDialogManualAdjust(false)
+  }
 
   const handleDialogSubmit = useCallback(async () => {
     if (!dialog) return
@@ -747,6 +1087,12 @@ export default function SchedulePlanner() {
       setError('Selecciona sala y bloque horario')
       return
     }
+    if (dialogDuration == null || dialogDuration <= 0) {
+      setError('Define una duración válida para la clase dentro del bloque seleccionado')
+      return
+    }
+    const offsetValue = dialogOffset != null && dialogOffset >= 0 ? Math.round(dialogOffset) : 0
+    const durationValue = Math.round(dialogDuration)
     setSaving(true)
     setError(null)
     try {
@@ -755,6 +1101,8 @@ export default function SchedulePlanner() {
           course_id: dialog.courseId,
           room_id: Number(dialogRoom),
           timeslot_id: Number(dialogTimeslot),
+          duration_minutes: durationValue,
+          start_offset_minutes: offsetValue,
         })
         setSuccess('Bloque agregado al horario')
       } else if (dialog.type === 'edit' && dialog.assignment.id != null) {
@@ -762,6 +1110,8 @@ export default function SchedulePlanner() {
           course_id: dialog.assignment.course_id,
           room_id: Number(dialogRoom),
           timeslot_id: Number(dialogTimeslot),
+          duration_minutes: durationValue,
+          start_offset_minutes: offsetValue,
         })
         setSuccess('Bloque actualizado')
       }
@@ -775,9 +1125,17 @@ export default function SchedulePlanner() {
     } finally {
       setSaving(false)
     }
-  }, [dialog, dialogRoom, dialogTimeslot, loadSemesterData, selectedSemester])
+  }, [dialog, dialogRoom, dialogTimeslot, dialogDuration, dialogOffset, loadSemesterData, selectedSemester])
 
   const totalAssignments = schedule.length
+  const dialogAvailability = useMemo(() => {
+    if (!dialog || !dialogRoom || !dialogTimeslot) return null
+    const roomIdNum = Number(dialogRoom)
+    const timeslotIdNum = Number(dialogTimeslot)
+    if (Number.isNaN(roomIdNum) || Number.isNaN(timeslotIdNum)) return null
+    const assignmentId = dialog.type === 'edit' ? dialog.assignment.id ?? null : null
+    return getRoomAvailability(roomIdNum, timeslotIdNum, assignmentId ?? null)
+  }, [dialog, dialogRoom, dialogTimeslot, getRoomAvailability])
 
   return (
     <Stack gap="xl">
@@ -899,7 +1257,10 @@ export default function SchedulePlanner() {
             label="Sala"
             data={roomOptions}
             value={dialogRoom}
-            onChange={setDialogRoom}
+            onChange={(value) => {
+              setDialogRoom(value)
+              setDialogManualAdjust(false)
+            }}
             placeholder="Selecciona una sala"
             searchable
             nothingFoundMessage="Sin salas"
@@ -908,11 +1269,44 @@ export default function SchedulePlanner() {
             label="Bloque horario"
             data={timeslotOptions}
             value={dialogTimeslot}
-            onChange={setDialogTimeslot}
+            onChange={(value) => {
+              setDialogTimeslot(value)
+              setDialogManualAdjust(false)
+            }}
             placeholder="Selecciona un bloque"
             searchable
             nothingFoundMessage="Sin bloques"
           />
+          {dialogAvailability && (
+            <Text size="xs" c="dimmed">
+              Bloque de {formatMinutesLabel(dialogAvailability.total)} · Libre total: {formatMinutesLabel(dialogAvailability.freeSegments.reduce((sum, gap) => sum + (gap.end - gap.start), 0))}
+            </Text>
+          )}
+          <NumberInput
+            label="Duración dentro del bloque (minutos)"
+            min={5}
+            step={5}
+            value={dialogDuration ?? undefined}
+            onChange={(value) => {
+              setDialogManualAdjust(true)
+              setDialogDuration(typeof value === 'number' ? value : null)
+            }}
+          />
+          <NumberInput
+            label="Inicio respecto al inicio del bloque (minutos)"
+            min={0}
+            step={5}
+            value={dialogOffset ?? 0}
+            onChange={(value) => {
+              setDialogManualAdjust(true)
+              setDialogOffset(typeof value === 'number' ? value : 0)
+            }}
+          />
+          {dialogError && (
+            <Alert color="orange" variant="light" title="Ajusta la asignación">
+              {dialogError}
+            </Alert>
+          )}
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={closeDialog} disabled={saving}>
               Cancelar

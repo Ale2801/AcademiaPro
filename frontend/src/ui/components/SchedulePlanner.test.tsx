@@ -113,12 +113,27 @@ function setupApiMocks() {
           day_of_week: baseTimeslot.day_of_week,
           start_time: '09:00',
           end_time: '10:00',
+          duration_minutes: payload.duration_minutes ?? 60,
+          start_offset_minutes: payload.start_offset_minutes ?? 0,
         }
         scheduleEntriesRef.current = [entry]
         return Promise.resolve({ data: entry })
       }
       case '/schedule/optimize':
-        return Promise.resolve({ data: { assignments: [[baseCourse.id, baseRoom.id, baseTimeslot.id]] } })
+        return Promise.resolve({
+          data: {
+            assignments: [
+              {
+                course_id: baseCourse.id,
+                room_id: baseRoom.id,
+                timeslot_id: baseTimeslot.id,
+                duration_minutes: 45,
+                start_offset_minutes: 15,
+              },
+            ],
+            unassigned: [{ course_id: baseCourse.id, remaining_minutes: 30 }],
+          },
+        })
       case '/schedule/assignments/save': {
         const entries = payload.assignments.map((assignment: any, idx: number) => ({
           id: 1000 + idx,
@@ -127,6 +142,8 @@ function setupApiMocks() {
           day_of_week: baseTimeslot.day_of_week,
           start_time: '09:00',
           end_time: '10:00',
+          duration_minutes: assignment.duration_minutes ?? 60,
+          start_offset_minutes: assignment.start_offset_minutes ?? 0,
         }))
         scheduleEntriesRef.current = entries
         return Promise.resolve({ data: entries })
@@ -171,11 +188,16 @@ describe('SchedulePlanner drag & drop experience', () => {
     fireEvent.click(submit)
 
     await waitFor(() => {
-      expect(postMock).toHaveBeenCalledWith('/course-schedules/', {
-        course_id: baseCourse.id,
-        room_id: baseRoom.id,
-        timeslot_id: baseTimeslot.id,
-      })
+      expect(postMock).toHaveBeenCalledWith(
+        '/course-schedules/',
+        expect.objectContaining({
+          course_id: baseCourse.id,
+          room_id: baseRoom.id,
+          timeslot_id: baseTimeslot.id,
+          duration_minutes: 60,
+          start_offset_minutes: 0,
+        })
+      )
     })
 
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
@@ -199,17 +221,32 @@ describe('SchedulePlanner drag & drop experience', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Aplicar propuesta' })).toBeInTheDocument())
 
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Optimización parcial: 1 bloques sugeridos\. Pendiente: .*30m\./i),
+      ).toBeInTheDocument(),
+    )
+
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar propuesta' }))
 
     await waitFor(() => {
       expect(postMock).toHaveBeenCalledWith(
         '/schedule/assignments/save',
         expect.objectContaining({
-          assignments: [expect.objectContaining({ course_id: baseCourse.id, timeslot_id: baseTimeslot.id })],
+          assignments: [
+            expect.objectContaining({
+              course_id: baseCourse.id,
+              timeslot_id: baseTimeslot.id,
+              duration_minutes: 45,
+              start_offset_minutes: 15,
+            }),
+          ],
           replace_existing: true,
         })
       )
     })
+
+    await waitFor(() => expect(screen.getByText('Horario aplicado correctamente')).toBeInTheDocument())
 
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
   })

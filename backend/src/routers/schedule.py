@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import time
+from datetime import time, datetime, timedelta
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -55,6 +55,8 @@ class AssignmentIn(BaseModel):
     course_id: int
     room_id: int
     timeslot_id: int
+    duration_minutes: Optional[int] = None
+    start_offset_minutes: Optional[int] = None
 
 
 class SaveAssignmentsRequest(BaseModel):
@@ -91,6 +93,8 @@ class ScheduleSlotOut(BaseModel):
     day_of_week: Optional[int]
     start_time: Optional[str]
     end_time: Optional[str]
+    duration_minutes: Optional[int]
+    start_offset_minutes: Optional[int]
     teacher_id: Optional[int]
     teacher_name: Optional[str]
     student_ids: List[int] = Field(default_factory=list)
@@ -184,6 +188,25 @@ def _build_schedule(entries: List[CourseSchedule], context, include_students: bo
         slot = timeslots.get(entry.timeslot_id)
         room = rooms.get(entry.room_id)
 
+        start_label: Optional[str] = None
+        end_label: Optional[str] = None
+
+        if slot:
+            base_start = datetime.combine(datetime.today(), slot.start_time)
+            slot_end_dt = datetime.combine(datetime.today(), slot.end_time)
+            block_start = base_start
+            if entry.start_offset_minutes is not None and entry.start_offset_minutes >= 0:
+                block_start = base_start + timedelta(minutes=entry.start_offset_minutes)
+            block_end = slot_end_dt
+            if entry.duration_minutes is not None and entry.duration_minutes > 0:
+                block_end = block_start + timedelta(minutes=entry.duration_minutes)
+            if block_start < base_start:
+                block_start = base_start
+            if block_end > slot_end_dt:
+                block_end = slot_end_dt
+            start_label = block_start.strftime("%H:%M")
+            end_label = block_end.strftime("%H:%M")
+
         payload.append(
             ScheduleSlotOut(
                 id=entry.id,
@@ -194,8 +217,10 @@ def _build_schedule(entries: List[CourseSchedule], context, include_students: bo
                 room_code=room.code if room else None,
                 timeslot_id=entry.timeslot_id,
                 day_of_week=slot.day_of_week if slot else None,
-                start_time=_time_to_str(slot.start_time if slot else None),
-                end_time=_time_to_str(slot.end_time if slot else None),
+                start_time=start_label or _time_to_str(slot.start_time if slot else None),
+                end_time=end_label or _time_to_str(slot.end_time if slot else None),
+                duration_minutes=entry.duration_minutes,
+                start_offset_minutes=entry.start_offset_minutes,
                 teacher_id=teacher_id,
                 teacher_name=teacher_name,
                 student_ids=enrollments_by_course.get(entry.course_id, []) if include_students else [],
@@ -226,15 +251,93 @@ def _fetch_entries(
     return session.exec(stmt).all()
 
 
+def _timeslot_total_minutes(slot: Timeslot) -> int:
+    start_dt = datetime.combine(datetime.today(), slot.start_time)
+    end_dt = datetime.combine(datetime.today(), slot.end_time)
+    delta = end_dt - start_dt
+    minutes = int(delta.total_seconds() // 60)
+    return max(minutes, 0)
+
+
+def _resolve_interval(slot: Timeslot, duration_minutes: Optional[int], start_offset_minutes: Optional[int]) -> tuple[int, int, int]:
+    total = _timeslot_total_minutes(slot)
+    duration = duration_minutes if duration_minutes and duration_minutes > 0 else total
+    if duration > total:
+        raise HTTPException(status_code=400, detail="La duración supera el tiempo disponible del bloque")
+    offset = start_offset_minutes or 0
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="El inicio parcial no puede ser negativo")
+    end_offset = offset + duration
+    if end_offset > total:
+        raise HTTPException(status_code=400, detail="La duración parcial excede el bloque seleccionado")
+    return offset, end_offset, duration
+
+
+def _assert_no_overlap(intervals: list[tuple[int, int]], new_interval: tuple[int, int]):
+    for existing_start, existing_end in intervals:
+        new_start, new_end = new_interval
+        if new_start < existing_end and new_end > existing_start:
+            raise HTTPException(status_code=400, detail="El bloque horario ya está ocupado en el intervalo seleccionado")
+    intervals.append(new_interval)
+    intervals.sort(key=lambda interval: interval[0])
+
+
 @router.post("/optimize")
-def optimize(courses: List[CourseIn], rooms: List[RoomIn], timeslots: List[TimeslotIn], constraints: ConstraintsIn, user=Depends(require_roles("admin"))):
-    solution = solve_schedule(
+def optimize(
+    courses: List[CourseIn],
+    rooms: List[RoomIn],
+    timeslots: List[TimeslotIn],
+    constraints: ConstraintsIn,
+    session=Depends(get_session),
+    user=Depends(require_roles("admin")),
+):
+    target_ids = {slot.timeslot_id for slot in timeslots}
+    db_slots = session.exec(select(Timeslot).where(Timeslot.id.in_(target_ids))).all()
+    slot_map = {slot.id: slot for slot in db_slots}
+    timeslot_inputs: List[TimeslotInput] = []
+    for slot_payload in timeslots:
+        slot = slot_map.get(slot_payload.timeslot_id)
+        if not slot:
+            raise HTTPException(status_code=404, detail=f"Bloque {slot_payload.timeslot_id} no encontrado")
+        start_minutes = slot.start_time.hour * 60 + slot.start_time.minute
+        duration_minutes = _timeslot_total_minutes(slot)
+        timeslot_inputs.append(
+            TimeslotInput(
+                timeslot_id=slot_payload.timeslot_id,
+                day=slot_payload.day,
+                block=slot_payload.block,
+                start_minutes=start_minutes,
+                duration_minutes=duration_minutes,
+            )
+        )
+
+    result = solve_schedule(
         [CourseInput(**c.model_dump()) for c in courses],
         [RoomInput(**r.model_dump()) for r in rooms],
-        [TimeslotInput(**t.model_dump()) for t in timeslots],
+        timeslot_inputs,
         Constraints(**constraints.model_dump()),
     )
-    return {"assignments": solution}
+
+    assignments_payload = [
+        {
+            "course_id": item.course_id,
+            "room_id": item.room_id,
+            "timeslot_id": item.timeslot_id,
+            "duration_minutes": item.duration_minutes,
+            "start_offset_minutes": item.start_offset_minutes,
+        }
+        for item in result.assignments
+    ]
+
+    unassigned_payload = [
+        {"course_id": course_id, "remaining_minutes": minutes}
+        for course_id, minutes in result.unassigned.items()
+    ]
+
+    response = {"assignments": assignments_payload}
+    if unassigned_payload:
+        response["unassigned"] = unassigned_payload
+    return response
 
 
 @router.post("/assignments/save", response_model=List[ScheduleSlotOut])
@@ -244,6 +347,33 @@ def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_sessio
     rooms = context["rooms"]
     timeslots = context["timeslots"]
     semesters = context["semesters"]
+
+    intervals_by_key: Dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    target_timeslot_ids = {a.timeslot_id for a in payload.assignments}
+    assignment_course_ids = {a.course_id for a in payload.assignments}
+    target_pairs = {
+        (a.room_id, a.timeslot_id)
+        for a in payload.assignments
+        if a.room_id is not None
+    }
+
+    if payload.assignments:
+        existing_for_timeslots = session.exec(
+            select(CourseSchedule).where(CourseSchedule.timeslot_id.in_(target_timeslot_ids))
+        ).all()
+        for entry in existing_for_timeslots:
+            if entry.room_id is None:
+                continue
+            pair = (entry.room_id, entry.timeslot_id)
+            if payload.replace_existing and (
+                entry.course_id in assignment_course_ids or pair in target_pairs
+            ):
+                continue
+            slot = timeslots.get(entry.timeslot_id)
+            if not slot:
+                continue
+            interval = _resolve_interval(slot, entry.duration_minutes, entry.start_offset_minutes)
+            _assert_no_overlap(intervals_by_key[(entry.room_id, entry.timeslot_id)], (interval[0], interval[1]))
 
     for assignment in payload.assignments:
         if assignment.course_id not in courses:
@@ -255,12 +385,25 @@ def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_sessio
         semester = semesters.get(courses[assignment.course_id].program_semester_id)
         if not semester:
             raise HTTPException(status_code=400, detail="El curso no está asociado a un semestre válido")
+        slot = timeslots[assignment.timeslot_id]
+        key = (assignment.room_id, assignment.timeslot_id)
+        interval = _resolve_interval(slot, assignment.duration_minutes, assignment.start_offset_minutes)
+        _assert_no_overlap(intervals_by_key[key], (interval[0], interval[1]))
 
     if payload.replace_existing and payload.assignments:
         course_ids = {a.course_id for a in payload.assignments}
         existing = _fetch_entries(session, list(course_ids))
         for entry in existing:
             session.delete(entry)
+
+        if target_pairs:
+            existing_for_timeslots = session.exec(
+                select(CourseSchedule).where(CourseSchedule.timeslot_id.in_(target_timeslot_ids))
+            ).all()
+            for entry in existing_for_timeslots:
+                pair = (entry.room_id, entry.timeslot_id)
+                if pair in target_pairs and entry.course_id not in course_ids:
+                    session.delete(entry)
 
     for assignment in payload.assignments:
         course = courses[assignment.course_id]
@@ -269,6 +412,8 @@ def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_sessio
             room_id=assignment.room_id,
             timeslot_id=assignment.timeslot_id,
             program_semester_id=course.program_semester_id,
+            duration_minutes=assignment.duration_minutes,
+            start_offset_minutes=assignment.start_offset_minutes,
         ))
 
     session.commit()

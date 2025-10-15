@@ -225,3 +225,5 @@ class CourseSchedule(SQLModel, table=True):
     room_id: int = Field(foreign_key="room.id")
     timeslot_id: int = Field(foreign_key="timeslot.id")
     program_semester_id: int = Field(foreign_key="programsemester.id", index=True)
+    duration_minutes: Optional[int] = Field(default=None, description="Minutos asignados dentro del bloque", sa_column_kwargs={"nullable": True})
+    start_offset_minutes: Optional[int] = Field(default=None, description="Minutos desde el inicio del bloque", sa_column_kwargs={"nullable": True})

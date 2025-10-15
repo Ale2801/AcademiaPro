@@ -1,11 +1,12 @@
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from __future__ import annotations
 
-try:
-    from ortools.sat.python import cp_model
-    HAS_ORTOOLS = True
-except Exception:
-    HAS_ORTOOLS = False
+from collections import defaultdict
+from dataclasses import dataclass
+from math import ceil
+from typing import Dict, List, Optional, Set
+
+
+GRANULARITY_MINUTES = 15
 
 
 @dataclass
@@ -26,6 +27,8 @@ class TimeslotInput:
     timeslot_id: int
     day: int
     block: int  # discrete block index in day
+    start_minutes: int
+    duration_minutes: int
 
 
 @dataclass
@@ -36,160 +39,302 @@ class Constraints:
     min_gap_blocks: int = 0
 
 
-def solve_schedule(courses: List[CourseInput], rooms: List[RoomInput], timeslots: List[TimeslotInput], cons: Constraints) -> List[Tuple[int, int, int]]:
-    """
-    Return list of (course_id, room_id, timeslot_id), one per hour required.
-    If OR-Tools not available, use greedy fallback.
-    """
-    if HAS_ORTOOLS:
-        return _solve_cp_sat(courses, rooms, timeslots, cons)
-    return _solve_greedy(courses, rooms, timeslots, cons)
+@dataclass
+class AssignmentResult:
+    course_id: int
+    room_id: int
+    timeslot_id: int
+    duration_minutes: int
+    start_offset_minutes: int
 
 
-def _solve_cp_sat(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]:
-    model = cp_model.CpModel()
-    T = [t.timeslot_id for t in timeslots]
-    R = [r.room_id for r in rooms]
+@dataclass
+class SolveResult:
+    assignments: List[AssignmentResult]
+    unassigned: Dict[int, int]  # course_id -> remaining minutes
 
-    # Variables x[c_index, r, t] in {0,1}
-    x = {}
-    for ci, c in enumerate(courses):
-        for r in R:
-            for t in T:
-                x[(ci, r, t)] = model.NewBoolVar(f"x_c{c.course_id}_r{r}_t{t}")
 
-    # Each course must be assigned exactly weekly_hours slots
-    for ci, c in enumerate(courses):
-        model.Add(sum(x[(ci, r, t)] for r in R for t in T) == c.weekly_hours)
+def solve_schedule(
+    courses: List[CourseInput],
+    rooms: List[RoomInput],
+    timeslots: List[TimeslotInput],
+    cons: Constraints,
+) -> SolveResult:
+    return _solve_partial_greedy(courses, rooms, timeslots, cons)
 
-    # Room/time uniqueness
-    for r in R:
-        for t in T:
-            model.Add(sum(x[(ci, r, t)] for ci, _ in enumerate(courses)) <= 1)
 
-    # Teacher availability and no double booking per timeslot
-    teacher_to_idx = {c.teacher_id: [] for c in courses}
-    for ci, c in enumerate(courses):
-        teacher_to_idx[c.teacher_id].append(ci)
-        allowed = set(cons.teacher_availability.get(c.teacher_id, T))
-        for t in T:
-            if t not in allowed:
-                for r in R:
-                    model.Add(x[(ci, r, t)] == 0)
+def _solve_partial_greedy(
+    courses: List[CourseInput],
+    rooms: List[RoomInput],
+    timeslots: List[TimeslotInput],
+    cons: Constraints,
+) -> SolveResult:
+    if not courses or not rooms or not timeslots:
+        return SolveResult([], {})
 
-    for t in T:
-        for teacher_id, idxs in teacher_to_idx.items():
-            model.Add(sum(x[(ci, r, t)] for ci in idxs for r in R) <= 1)
+    slot_lookup = {slot.timeslot_id: slot for slot in timeslots}
+    total_units_by_slot: Dict[int, int] = {}
+    for slot in timeslots:
+        units = max(slot.duration_minutes // GRANULARITY_MINUTES, 0)
+        if units > 0:
+            total_units_by_slot[slot.timeslot_id] = units
+    if not total_units_by_slot:
+        return SolveResult([], {})
 
-    # Optional room_allowed
+    required_units: Dict[int, int] = {}
+    remaining_units: Dict[int, int] = {}
+    course_lookup: Dict[int, CourseInput] = {}
+    for course in courses:
+        needed_minutes = max(course.weekly_hours, 0) * 60
+        needed_units = max(ceil(needed_minutes / GRANULARITY_MINUTES), 0)
+        if needed_units <= 0:
+            continue
+        required_units[course.course_id] = needed_units
+        remaining_units[course.course_id] = needed_units
+        course_lookup[course.course_id] = course
+
+    if not required_units:
+        return SolveResult([], {})
+
+    all_timeslot_ids: Set[int] = set(slot_lookup.keys())
+    allowed_slots_map: Dict[int, Set[int]] = {}
+    for course in courses:
+        if course.course_id not in required_units:
+            continue
+        if course.teacher_id in cons.teacher_availability:
+            allowed = set(cons.teacher_availability[course.teacher_id]) & all_timeslot_ids
+        else:
+            allowed = set(all_timeslot_ids)
+        allowed_slots_map[course.course_id] = allowed
+
+    room_allowed_map: Dict[int, Set[int]] = {}
     if cons.room_allowed:
-        for r in R:
-            allowed = set(cons.room_allowed.get(r, T))
-            for t in T:
-                if t not in allowed:
-                    for ci, _ in enumerate(courses):
-                        model.Add(x[(ci, r, t)] == 0)
+        for room_id, ids in cons.room_allowed.items():
+            room_allowed_map[room_id] = set(ids)
 
-    # Enforce minimum gaps between clases for each teacher per day
+    assignments_units: Dict[tuple[int, int, int], List[int]] = defaultdict(list)
+    assigned_units_per_course: Dict[int, int] = defaultdict(int)
+    teacher_busy_slot: Dict[tuple[int, int], int] = {}
+    teacher_day_blocks: Dict[int, Dict[int, Set[int]]] = defaultdict(lambda: defaultdict(set))
+
+    rooms_order = sorted(rooms, key=lambda r: (r.capacity * -1, r.room_id))
+    slots_order = sorted(timeslots, key=lambda s: (s.day, s.block, s.start_minutes))
+
+    for slot in slots_order:
+        total_units = total_units_by_slot.get(slot.timeslot_id, 0)
+        if total_units <= 0:
+            continue
+
+        per_room_units: Dict[int, List[int]] = {}
+        for room in rooms_order:
+            if cons.room_allowed and room.room_id in room_allowed_map:
+                if slot.timeslot_id not in room_allowed_map[room.room_id]:
+                    continue
+            per_room_units[room.room_id] = list(range(total_units))
+        if not per_room_units:
+            continue
+
+        eligible_courses = [
+            course_id
+            for course_id, remaining in remaining_units.items()
+            if remaining > 0 and slot.timeslot_id in allowed_slots_map.get(course_id, set())
+        ]
+        if not eligible_courses:
+            continue
+
+        remaining_units_slot = sum(len(indices) for indices in per_room_units.values())
+        active_courses = eligible_courses[:]
+        course_room_lock: Dict[int, int] = {}
+
+        while (
+            remaining_units_slot > 0
+            and active_courses
+            and any(per_room_units.values())
+        ):
+            cycle_success = False
+            if not active_courses:
+                break
+            quota = max(1, ceil(remaining_units_slot / len(active_courses)))
+            next_active: List[int] = []
+
+            for course_id in list(active_courses):
+                if remaining_units_slot <= 0:
+                    break
+                remaining = remaining_units.get(course_id, 0)
+                if remaining <= 0:
+                    continue
+                if not _teacher_can_take_slot(
+                    course_id,
+                    slot,
+                    course_lookup,
+                    teacher_busy_slot,
+                    teacher_day_blocks,
+                    cons,
+                ):
+                    continue
+
+                chunk_target = min(remaining, quota, remaining_units_slot)
+                if chunk_target <= 0:
+                    continue
+
+                assigned_chunk = _assign_chunk_to_course(
+                    course_id,
+                    chunk_target,
+                    per_room_units,
+                    rooms_order,
+                    slot,
+                    assignments_units,
+                    course_room_lock,
+                )
+                if assigned_chunk == 0:
+                    continue
+
+                cycle_success = True
+                remaining_units_slot -= assigned_chunk
+                remaining_units[course_id] = remaining - assigned_chunk
+                assigned_units_per_course[course_id] += assigned_chunk
+
+                teacher_id = course_lookup[course_id].teacher_id
+                if teacher_id is not None:
+                    teacher_busy_slot[(teacher_id, slot.timeslot_id)] = course_id
+                    teacher_day_blocks[teacher_id][slot.day].add(slot.block)
+
+                if remaining_units[course_id] > 0 and remaining_units_slot > 0:
+                    next_active.append(course_id)
+
+            if not cycle_success:
+                break
+
+            if next_active:
+                active_courses = next_active
+            else:
+                active_courses = [
+                    course_id
+                    for course_id in eligible_courses
+                    if remaining_units.get(course_id, 0) > 0
+                    and _teacher_can_take_slot(
+                        course_id,
+                        slot,
+                        course_lookup,
+                        teacher_busy_slot,
+                        teacher_day_blocks,
+                        cons,
+                    )
+                ]
+
+    assignments: List[AssignmentResult] = []
+    for (course_id, room_id, timeslot_id), units in assignments_units.items():
+        if not units:
+            continue
+        ordered = sorted(units)
+        start_unit = ordered[0]
+        length = 1
+        for current, previous in zip(ordered[1:], ordered[:-1]):
+            if current == previous + 1:
+                length += 1
+            else:
+                assignments.append(
+                    AssignmentResult(
+                        course_id=course_id,
+                        room_id=room_id,
+                        timeslot_id=timeslot_id,
+                        start_offset_minutes=start_unit * GRANULARITY_MINUTES,
+                        duration_minutes=length * GRANULARITY_MINUTES,
+                    )
+                )
+                start_unit = current
+                length = 1
+        assignments.append(
+            AssignmentResult(
+                course_id=course_id,
+                room_id=room_id,
+                timeslot_id=timeslot_id,
+                start_offset_minutes=start_unit * GRANULARITY_MINUTES,
+                duration_minutes=length * GRANULARITY_MINUTES,
+            )
+        )
+
+    unassigned: Dict[int, int] = {}
+    for course_id, required in required_units.items():
+        assigned = assigned_units_per_course.get(course_id, 0)
+        remaining = max(required - assigned, 0)
+        if remaining > 0:
+            unassigned[course_id] = remaining * GRANULARITY_MINUTES
+
+    return SolveResult(assignments=assignments, unassigned=unassigned)
+
+
+def _teacher_can_take_slot(
+    course_id: int,
+    slot: TimeslotInput,
+    course_lookup: Dict[int, CourseInput],
+    teacher_busy_slot: Dict[tuple[int, int], int],
+    teacher_day_blocks: Dict[int, Dict[int, Set[int]]],
+    cons: Constraints,
+) -> bool:
+    course = course_lookup.get(course_id)
+    if not course:
+        return False
+
+    teacher_id = course.teacher_id
+    if teacher_id is None:
+        return True
+
+    busy_course = teacher_busy_slot.get((teacher_id, slot.timeslot_id))
+    if busy_course is not None and busy_course != course_id:
+        return False
+
     if cons.min_gap_blocks > 0:
-        slots_by_day: Dict[int, List[TimeslotInput]] = {}
-        for slot in timeslots:
-            slots_by_day.setdefault(slot.day, []).append(slot)
+        blocks_for_teacher = teacher_day_blocks[teacher_id][slot.day]
+        for existing_block in blocks_for_teacher:
+            if existing_block == slot.block and busy_course not in (None, course_id):
+                return False
+            if existing_block != slot.block and abs(slot.block - existing_block) <= cons.min_gap_blocks:
+                return False
 
-        for day, slot_list in slots_by_day.items():
-            ordered = sorted(slot_list, key=lambda s: s.block)
-            for idx in range(len(ordered)):
-                current = ordered[idx]
-                for next_idx in range(idx + 1, len(ordered)):
-                    nxt = ordered[next_idx]
-                    block_diff = nxt.block - current.block
-                    if block_diff == 0:
-                        continue
-                    if block_diff <= cons.min_gap_blocks:
-                        t1 = current.timeslot_id
-                        t2 = nxt.timeslot_id
-                        for teacher_id, course_indexes in teacher_to_idx.items():
-                            model.Add(
-                                sum(x[(ci, r, t1)] for ci in course_indexes for r in R)
-                                + sum(x[(ci, r, t2)] for ci in course_indexes for r in R)
-                                <= 1
-                            )
-                    else:
-                        break
-
-    # Soft constraint: limit consecutive blocks per course per day
-    # We approximate by discouraging 4+ consecutive via minimization
-    obj_terms = []
-    slot_by_day_block = {t.timeslot_id: (t.day, t.block) for t in timeslots}
-    for ci, c in enumerate(courses):
-        for day in set(d for _, (d, _) in slot_by_day_block.items()):
-            # For each sequence of cons.max_consecutive_blocks+1 blocks, penalize if all are used
-            day_blocks = sorted([b for tid, (d, b) in slot_by_day_block.items() if d == day])
-            unique_blocks = sorted(set(day_blocks))
-            for i in range(0, max(0, len(unique_blocks) - cons.max_consecutive_blocks)):
-                window = unique_blocks[i : i + cons.max_consecutive_blocks + 1]
-                for r in R:
-                    w_vars = [sum(x[(ci, r, t)] for t, (d, b) in slot_by_day_block.items() if d == day and b == wb) for wb in window]
-                    win = model.NewIntVar(0, len(window), f"win_c{ci}_d{day}_i{i}_r{r}")
-                    model.Add(win == sum(w_vars))
-                    # Penalize if equals len(window)
-                    penalty = model.NewBoolVar(f"pen_c{ci}_d{day}_i{i}_r{r}")
-                    model.Add(win == len(window)).OnlyEnforceIf(penalty)
-                    model.Add(win != len(window)).OnlyEnforceIf(penalty.Not())
-                    obj_terms.append(penalty)
-
-    model.Minimize(sum(obj_terms))
-
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 10.0
-    res = solver.Solve(model)
-    if res not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return []
-
-    out = []
-    for ci, c in enumerate(courses):
-        for r in R:
-            for t in T:
-                if solver.Value(x[(ci, r, t)]) == 1:
-                    out.append((c.course_id, r, t))
-    return out
+    return True
 
 
-def _solve_greedy(courses, rooms, timeslots, cons) -> List[Tuple[int, int, int]]:
-    # Simple greedy: iterate courses and fill first available slots
-    out: List[Tuple[int, int, int]] = []
-    used_rt = set()
-    T = [t.timeslot_id for t in timeslots]
-    teacher_busy = {c.teacher_id: set() for c in courses}
-    teacher_day_blocks: Dict[int, Dict[int, List[int]]] = {c.teacher_id: {} for c in courses}
-    slot_lookup: Dict[int, TimeslotInput] = {t.timeslot_id: t for t in timeslots}
-    for c in courses:
-        allowed_t = cons.teacher_availability.get(c.teacher_id, T)
-        assigned = 0
-        for t in allowed_t:
-            if assigned >= c.weekly_hours:
-                break
-            # avoid teacher double booking
-            if t in teacher_busy[c.teacher_id]:
-                continue
-            meta = slot_lookup.get(t)
-            if not meta:
-                continue
-            if cons.min_gap_blocks > 0:
-                day_blocks = teacher_day_blocks[c.teacher_id].setdefault(meta.day, [])
-                violates = any(abs(meta.block - existing) <= cons.min_gap_blocks for existing in day_blocks)
-                if violates:
-                    continue
-            # find free room
-            for r in rooms:
-                if (r.room_id, t) in used_rt:
-                    continue
-                if cons.room_allowed and t not in cons.room_allowed.get(r.room_id, T):
-                    continue
-                out.append((c.course_id, r.room_id, t))
-                used_rt.add((r.room_id, t))
-                teacher_busy[c.teacher_id].add(t)
-                teacher_day_blocks[c.teacher_id].setdefault(meta.day, []).append(meta.block)
-                assigned += 1
-                break
-    return out
+def _assign_chunk_to_course(
+    course_id: int,
+    chunk_target: int,
+    per_room_units: Dict[int, List[int]],
+    rooms_order: List[RoomInput],
+    slot: TimeslotInput,
+    assignments_units: Dict[tuple[int, int, int], List[int]],
+    course_room_lock: Dict[int, int],
+) -> int:
+    lock_room_id = course_room_lock.get(course_id)
+    assigned = 0
+
+    def _consume(room_id: int, available_units: List[int], amount: int) -> int:
+        taken = 0
+        for _ in range(amount):
+            unit_index = available_units.pop(0)
+            assignments_units[(course_id, room_id, slot.timeslot_id)].append(unit_index)
+            taken += 1
+        return taken
+
+    if lock_room_id is not None:
+        available = per_room_units.get(lock_room_id)
+        if not available:
+            return 0
+        to_take = min(chunk_target, len(available))
+        if to_take <= 0:
+            return 0
+        assigned = _consume(lock_room_id, available, to_take)
+        return assigned
+
+    for room in rooms_order:
+        available = per_room_units.get(room.room_id)
+        if not available:
+            continue
+        to_take = min(chunk_target, len(available))
+        if to_take <= 0:
+            continue
+        assigned = _consume(room.room_id, available, to_take)
+        if assigned > 0:
+            course_room_lock[course_id] = room.room_id
+        return assigned
+
+    return 0

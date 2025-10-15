@@ -78,3 +78,22 @@ def admin_token(client: TestClient):
     res = client.post("/auth/token", data={"username": email, "password": "admin123"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
     assert res.status_code == 200, res.text
     return res.json()["access_token"]
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_course_schedules():
+    yield
+    # Limpia las asignaciones después de cada prueba para evitar interferencias.
+    try:
+        from sqlmodel import Session, delete
+        from src.db import engine
+        from src.models import CourseSchedule
+    except Exception:
+        return
+
+    if engine is None:
+        return
+
+    with Session(engine) as session:
+        session.exec(delete(CourseSchedule))
+        session.commit()
