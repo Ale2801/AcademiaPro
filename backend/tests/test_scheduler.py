@@ -337,6 +337,134 @@ def test_optimizer_does_not_split_course_across_rooms(client: TestClient, admin_
         assert remaining["remaining_minutes"] == 120
 
 
+def test_optimizer_blocks_teacher_conflict_from_existing_assignments(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+
+    program_a = client.post(
+        "/programs/",
+        json={"code": "CONF-A", "name": "Programa Conflicto A", "level": "undergrad", "duration_semesters": 2},
+        headers=headers,
+    )
+    assert program_a.status_code == 200, program_a.text
+    program_b = client.post(
+        "/programs/",
+        json={"code": "CONF-B", "name": "Programa Conflicto B", "level": "undergrad", "duration_semesters": 2},
+        headers=headers,
+    )
+    assert program_b.status_code == 200, program_b.text
+
+    semester_a = client.post(
+        "/program-semesters/",
+        json={"program_id": program_a.json()["id"], "semester_number": 1, "label": "Semestre 1", "is_active": True},
+        headers=headers,
+    )
+    assert semester_a.status_code == 200, semester_a.text
+    semester_b = client.post(
+        "/program-semesters/",
+        json={"program_id": program_b.json()["id"], "semester_number": 1, "label": "Semestre 1", "is_active": True},
+        headers=headers,
+    )
+    assert semester_b.status_code == 200, semester_b.text
+
+    subject_a = client.post(
+        "/subjects/",
+        json={"code": "CONF-SUB-A", "name": "Asignatura Conflicto A", "credits": 3, "program_id": program_a.json()["id"]},
+        headers=headers,
+    )
+    assert subject_a.status_code == 200, subject_a.text
+    subject_b = client.post(
+        "/subjects/",
+        json={"code": "CONF-SUB-B", "name": "Asignatura Conflicto B", "credits": 3, "program_id": program_b.json()["id"]},
+        headers=headers,
+    )
+    assert subject_b.status_code == 200, subject_b.text
+
+    teacher = _ensure_teacher(client, headers)
+    room = _ensure_room(client, headers)
+    conflict_slot = _ensure_timeslot_at(client, headers, day_of_week=0, start_time="08:00", end_time="10:00")
+
+    course_b = client.post(
+        "/courses/",
+        json={
+            "subject_id": subject_b.json()["id"],
+            "teacher_id": teacher["id"],
+            "term": "2025-1",
+            "group": "X",
+            "weekly_hours": 2,
+            "program_semester_id": semester_b.json()["id"],
+        },
+        headers=headers,
+    )
+    assert course_b.status_code == 200, course_b.text
+
+    save_response = client.post(
+        "/schedule/assignments/save",
+        json={
+            "assignments": [
+                {
+                    "course_id": course_b.json()["id"],
+                    "room_id": room["id"],
+                    "timeslot_id": conflict_slot["id"],
+                }
+            ],
+            "replace_existing": True,
+        },
+        headers=headers,
+    )
+    assert save_response.status_code == 200, save_response.text
+
+    course_a = client.post(
+        "/courses/",
+        json={
+            "subject_id": subject_a.json()["id"],
+            "teacher_id": teacher["id"],
+            "term": "2025-1",
+            "group": "Y",
+            "weekly_hours": 2,
+            "program_semester_id": semester_a.json()["id"],
+        },
+        headers=headers,
+    )
+    assert course_a.status_code == 200, course_a.text
+
+    response = client.post(
+        "/schedule/optimize",
+        json={
+            "courses": [
+                {
+                    "course_id": course_a.json()["id"],
+                    "teacher_id": teacher["id"],
+                    "weekly_hours": 2,
+                }
+            ],
+            "rooms": [
+                {
+                    "room_id": room["id"],
+                    "capacity": room.get("capacity", 30),
+                }
+            ],
+            "timeslots": [
+                {
+                    "timeslot_id": conflict_slot["id"],
+                    "day": conflict_slot["day_of_week"],
+                    "block": 1,
+                }
+            ],
+            "constraints": {
+                "teacher_availability": {teacher["id"]: [conflict_slot["id"]]},
+                "max_consecutive_blocks": 2,
+            },
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert all(item["course_id"] != course_a.json()["id"] for item in payload["assignments"])
+    unassigned = next((item for item in payload.get("unassigned", []) if item["course_id"] == course_a.json()["id"]), None)
+    assert unassigned is not None
+    assert unassigned["remaining_minutes"] == 120
+
+
 def test_schedule_save_and_overview(client: TestClient, admin_token: str):
     headers = _auth_headers(admin_token)
     entities = _ensure_schedule_entities(client, headers)

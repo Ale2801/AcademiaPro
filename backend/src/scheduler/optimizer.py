@@ -37,6 +37,7 @@ class Constraints:
     room_allowed: Optional[Dict[int, List[int]]] = None  # room_id -> allowed timeslot_ids
     max_consecutive_blocks: int = 3
     min_gap_blocks: int = 0
+    teacher_conflicts: Optional[Dict[int, List[int]]] = None  # teacher_id -> occupied timeslot_ids
 
 
 @dataclass
@@ -112,6 +113,11 @@ def _solve_partial_greedy(
         for room_id, ids in cons.room_allowed.items():
             room_allowed_map[room_id] = set(ids)
 
+    teacher_conflicts_map: Dict[int, Set[int]] = {}
+    if cons.teacher_conflicts:
+        for teacher_id, ids in cons.teacher_conflicts.items():
+            teacher_conflicts_map[teacher_id] = set(ids)
+
     assignments_units: Dict[tuple[int, int, int], List[int]] = defaultdict(list)
     assigned_units_per_course: Dict[int, int] = defaultdict(int)
     teacher_busy_slot: Dict[tuple[int, int], int] = {}
@@ -170,6 +176,7 @@ def _solve_partial_greedy(
                     teacher_busy_slot,
                     teacher_day_blocks,
                     cons,
+                    teacher_conflicts_map,
                 ):
                     continue
 
@@ -219,6 +226,7 @@ def _solve_partial_greedy(
                         teacher_busy_slot,
                         teacher_day_blocks,
                         cons,
+                        teacher_conflicts_map,
                     )
                 ]
 
@@ -271,6 +279,7 @@ def _teacher_can_take_slot(
     teacher_busy_slot: Dict[tuple[int, int], int],
     teacher_day_blocks: Dict[int, Dict[int, Set[int]]],
     cons: Constraints,
+    teacher_conflicts_map: Dict[int, Set[int]],
 ) -> bool:
     course = course_lookup.get(course_id)
     if not course:
@@ -279,6 +288,10 @@ def _teacher_can_take_slot(
     teacher_id = course.teacher_id
     if teacher_id is None:
         return True
+
+    conflicts = teacher_conflicts_map.get(teacher_id)
+    if conflicts and slot.timeslot_id in conflicts:
+        return False
 
     busy_course = teacher_busy_slot.get((teacher_id, slot.timeslot_id))
     if busy_course is not None and busy_course != course_id:

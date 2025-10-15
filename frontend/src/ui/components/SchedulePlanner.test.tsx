@@ -250,4 +250,41 @@ describe('SchedulePlanner drag & drop experience', () => {
 
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
   })
+
+  it('muestra un resumen cuando el optimizador detecta conflictos docentes sin bloques sugeridos', async () => {
+    renderPlanner()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ejecutar optimizador' })).toBeEnabled())
+
+    postMock.mockImplementationOnce((path: string) => {
+      expect(path).toBe('/schedule/optimize')
+      return Promise.resolve({
+        data: {
+          assignments: [],
+          unassigned: [{ course_id: baseCourse.id, remaining_minutes: 120 }],
+        },
+      })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    await waitFor(() => {
+      expect(postMock).toHaveBeenCalledWith(
+        '/schedule/optimize',
+        expect.objectContaining({
+          courses: [expect.objectContaining({ course_id: baseCourse.id })],
+        }),
+      )
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Optimización parcial: 0 bloques sugeridos\. Pendiente: .*2h\./i),
+      ).toBeInTheDocument(),
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Aplicar propuesta' })).not.toBeInTheDocument()
+    })
+  })
 })

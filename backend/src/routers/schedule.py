@@ -49,6 +49,7 @@ class ConstraintsIn(BaseModel):
     room_allowed: Optional[Dict[int, List[int]]] = None
     max_consecutive_blocks: int = 3
     min_gap_blocks: int = 0
+    teacher_conflicts: Optional[Dict[int, List[int]]] = None
 
 
 class AssignmentIn(BaseModel):
@@ -311,11 +312,54 @@ def optimize(
             )
         )
 
+    request_course_ids = {course.course_id for course in courses}
+    teacher_conflicts: Dict[int, set[int]] = {}
+    if target_ids:
+        existing_entries = session.exec(
+            select(CourseSchedule).where(CourseSchedule.timeslot_id.in_(target_ids))
+        ).all()
+        conflict_course_ids = {
+            entry.course_id
+            for entry in existing_entries
+            if entry.course_id not in request_course_ids
+        }
+        if conflict_course_ids:
+            related_courses = session.exec(
+                select(Course).where(Course.id.in_(conflict_course_ids))
+            ).all()
+            teacher_lookup = {course.id: course.teacher_id for course in related_courses}
+            for entry in existing_entries:
+                if entry.course_id in request_course_ids:
+                    continue
+                teacher_id = teacher_lookup.get(entry.course_id)
+                if not teacher_id:
+                    continue
+                if teacher_id not in teacher_conflicts:
+                    teacher_conflicts[teacher_id] = set()
+                teacher_conflicts[teacher_id].add(entry.timeslot_id)
+
+    constraints_data = constraints.model_dump()
+    raw_conflicts = constraints_data.get("teacher_conflicts") or {}
+    merged_conflicts: Dict[int, set[int]] = {}
+    for key, values in raw_conflicts.items():
+        try:
+            teacher_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        merged_conflicts[teacher_id] = set(int(value) for value in values)
+    for teacher_id, slots in teacher_conflicts.items():
+        merged_conflicts.setdefault(teacher_id, set()).update(slots)
+    constraints_data["teacher_conflicts"] = {
+        teacher_id: sorted(slots)
+        for teacher_id, slots in merged_conflicts.items()
+        if slots
+    }
+
     result = solve_schedule(
         [CourseInput(**c.model_dump()) for c in courses],
         [RoomInput(**r.model_dump()) for r in rooms],
         timeslot_inputs,
-        Constraints(**constraints.model_dump()),
+        Constraints(**constraints_data),
     )
 
     assignments_payload = [

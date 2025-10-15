@@ -143,6 +143,13 @@ def _ensure_programs(session: Session) -> Dict[str, Program]:
             "duration_semesters": 4,
             "description": "Análisis predictivo, machine learning y visualización de datos.",
         },
+        {
+            "code": "ING-IND",
+            "name": "Ingeniería Industrial",
+            "level": "undergrad",
+            "duration_semesters": 10,
+            "description": "Optimización de procesos, logística y sistemas productivos.",
+        },
     ]
     mapping: Dict[str, Program] = {}
     for item in data:
@@ -238,6 +245,22 @@ def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[
             "description": "ETL, orquestación y pipelines en la nube.",
             "hours_per_week": 4,
         },
+        {
+            "code": "IND130",
+            "name": "Fundamentos de Ingeniería Industrial",
+            "credits": 5,
+            "program_code": "ING-IND",
+            "description": "Introducción a sistemas productivos y optimización.",
+            "hours_per_week": 4,
+        },
+        {
+            "code": "IND240",
+            "name": "Logística y Cadena de Suministro",
+            "credits": 4,
+            "program_code": "ING-IND",
+            "description": "Gestión de inventarios, transporte y distribución.",
+            "hours_per_week": 3,
+        },
     ]
     mapping: Dict[str, Subject] = {}
     for item in data:
@@ -308,6 +331,14 @@ def _ensure_teachers(session: Session) -> Dict[str, Teacher]:
             "department": "Ciencia de Datos",
             "specialty": "Big Data",
             "office": "CI-102",
+        },
+        {
+            "email": "docente7@academiapro.dev",
+            "full_name": "Elena Prieto",
+            "password": "teacher123",
+            "department": "Ingeniería Industrial",
+            "specialty": "Optimización de Procesos",
+            "office": "E-215",
         },
     ]
 
@@ -407,6 +438,8 @@ def _ensure_timeslots(session: Session) -> Dict[str, Timeslot]:
         (time(11, 30), time(13, 0)),
         (time(14, 0), time(15, 30)),
         (time(15, 45), time(17, 15)),
+        (time(17, 30), time(19, 0)),
+        (time(19, 15), time(20, 45)),
     ]
     data = [
         {"day_of_week": day, "start_time": start, "end_time": end}
@@ -611,6 +644,30 @@ def _ensure_courses(
             "program_code": "ING-SIS",
             "semester_number": 3,
         },
+        {
+            "key": "IND130-2025-1-A",
+            "subject_code": "IND130",
+            "teacher_email": "docente7@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 4,
+            "capacity": 28,
+            "modality": ModalityEnum.in_person,
+            "program_code": "ING-IND",
+            "semester_number": 1,
+        },
+        {
+            "key": "IND240-2025-1-A",
+            "subject_code": "IND240",
+            "teacher_email": "docente2@academiapro.dev",
+            "term": "2025-1",
+            "group": "A",
+            "weekly_hours": 3,
+            "capacity": 30,
+            "modality": ModalityEnum.hybrid,
+            "program_code": "ING-IND",
+            "semester_number": 2,
+        },
     ]
 
     mapping: Dict[str, Course] = {}
@@ -665,16 +722,18 @@ def _ensure_course_schedules(
     data = [
         {"course_key": "MAT101-2025-1-A", "room_code": "A-201", "timeslot_key": "0-08:00"},
         {"course_key": "MAT101-2025-1-B", "room_code": "B-105", "timeslot_key": "0-09:45"},
-        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "1-14:00"},
+        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "1-14:00", "duration_minutes": 75, "start_offset_minutes": 15},
         {"course_key": "PRO201-2025-1-B", "room_code": "LAB-IA", "timeslot_key": "3-09:45"},
         {"course_key": "ADM120-2025-1-A", "room_code": "AUD-1", "timeslot_key": "2-11:30"},
         {"course_key": "ADM210-2025-1-A", "room_code": "C-301", "timeslot_key": "1-08:00"},
         {"course_key": "ADM315-2025-1-A", "room_code": "C-301", "timeslot_key": "4-14:00"},
-        {"course_key": "DS501-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "2-08:00"},
+        {"course_key": "DS501-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "2-08:00", "duration_minutes": 60},
         {"course_key": "DS510-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "1-11:30"},
         {"course_key": "DS530-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "3-14:00"},
         {"course_key": "BD301-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "2-14:00"},
         {"course_key": "SIS320-2025-1-A", "room_code": "A-201", "timeslot_key": "4-08:00"},
+        {"course_key": "IND130-2025-1-A", "room_code": "B-105", "timeslot_key": "3-17:30", "duration_minutes": 90},
+        {"course_key": "IND240-2025-1-A", "room_code": "C-301", "timeslot_key": "1-19:15"},
     ]
 
     for item in data:
@@ -691,16 +750,31 @@ def _ensure_course_schedules(
                 CourseSchedule.timeslot_id == timeslot.id,
             )
         ).first()
+        payload = {
+            "course_id": course.id,
+            "room_id": room.id,
+            "timeslot_id": timeslot.id,
+            "program_semester_id": course.program_semester_id,
+            "duration_minutes": item.get("duration_minutes"),
+            "start_offset_minutes": item.get("start_offset_minutes"),
+        }
         if not existing:
-            session.add(
-                CourseSchedule(
-                    course_id=course.id,
-                    room_id=room.id,
-                    timeslot_id=timeslot.id,
-                    program_semester_id=course.program_semester_id,
-                )
-            )
+            session.add(CourseSchedule(**payload))
             session.commit()
+        else:
+            updated = False
+            if existing.duration_minutes != payload["duration_minutes"]:
+                existing.duration_minutes = payload["duration_minutes"]
+                updated = True
+            if existing.start_offset_minutes != payload["start_offset_minutes"]:
+                existing.start_offset_minutes = payload["start_offset_minutes"]
+                updated = True
+            if existing.program_semester_id != payload["program_semester_id"]:
+                existing.program_semester_id = payload["program_semester_id"]
+                updated = True
+            if updated:
+                session.add(existing)
+                session.commit()
 
 
 def _ensure_students(session: Session, program_map: Dict[str, Program]) -> Dict[str, Student]:
@@ -825,6 +899,26 @@ def _ensure_students(session: Session, program_map: Dict[str, Program]) -> Dict[
             "section": "C",
             "current_term": "2025-1",
         },
+        {
+            "email": "estudiante13@academiapro.dev",
+            "full_name": "Valentina Cruz",
+            "password": "student123",
+            "enrollment_year": 2022,
+            "program_code": "ING-IND",
+            "registration_number": "2022-034",
+            "section": "A",
+            "current_term": "2025-1",
+        },
+        {
+            "email": "estudiante14@academiapro.dev",
+            "full_name": "Luis Herrera",
+            "password": "student123",
+            "enrollment_year": 2023,
+            "program_code": "ING-IND",
+            "registration_number": "2023-041",
+            "section": "B",
+            "current_term": "2025-1",
+        },
     ]
 
     mapping: Dict[str, Student] = {}
@@ -882,6 +976,8 @@ def _ensure_enrollments(
         "estudiante10@academiapro.dev": ["DS501-2025-1-A", "DS510-2025-1-A"],
         "estudiante11@academiapro.dev": ["ADM210-2025-1-A", "ADM315-2025-1-A"],
         "estudiante12@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A", "PRO201-2025-1-B"],
+        "estudiante13@academiapro.dev": ["IND130-2025-1-A", "IND240-2025-1-A"],
+        "estudiante14@academiapro.dev": ["IND130-2025-1-A"],
     }
 
     data = [
@@ -945,6 +1041,18 @@ def _ensure_evaluations(
             "name": "Caso Práctico",
             "weight": 0.6,
             "scheduled_at": datetime(2025, 4, 22, 18, 0),
+        },
+        {
+            "course_key": "IND130-2025-1-A",
+            "name": "Proyecto de Mejora",
+            "weight": 0.35,
+            "scheduled_at": datetime(2025, 4, 18, 18, 30),
+        },
+        {
+            "course_key": "IND240-2025-1-A",
+            "name": "Simulación Logística",
+            "weight": 0.4,
+            "scheduled_at": datetime(2025, 5, 8, 19, 0),
         },
     ]
 
