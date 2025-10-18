@@ -31,6 +31,7 @@ class CourseIn(BaseModel):
     course_id: int
     teacher_id: int
     weekly_hours: int
+    program_semester_id: Optional[int] = None  # Para rastrear carga por programa
 
 
 class RoomIn(BaseModel):
@@ -47,9 +48,13 @@ class TimeslotIn(BaseModel):
 class ConstraintsIn(BaseModel):
     teacher_availability: Dict[int, List[int]]
     room_allowed: Optional[Dict[int, List[int]]] = None
-    max_consecutive_blocks: int = 3
+    max_consecutive_blocks: int = 4  # Aumentado de 3 a 4 para ser más realista
     min_gap_blocks: int = 0
+    min_gap_minutes: int = 15  # Recreos entre clases
     teacher_conflicts: Optional[Dict[int, List[int]]] = None
+    lunch_blocks: Optional[List[tuple[int, int]]] = None  # [(day, hour), ...]
+    max_daily_hours_per_program: int = 6  # Máximo horas por día por programa
+    balance_weight: float = 0.3  # Peso para distribución balanceada
 
 
 class AssignmentIn(BaseModel):
@@ -378,10 +383,23 @@ def optimize(
         for course_id, minutes in result.unassigned.items()
     ]
 
-    response = {"assignments": assignments_payload}
-    if unassigned_payload:
-        response["unassigned"] = unassigned_payload
-    return response
+    return {
+        "assignments": assignments_payload,
+        "unassigned": unassigned_payload,
+        "quality_metrics": {
+            "total_assigned": result.quality_metrics.total_assigned,
+            "total_unassigned": result.quality_metrics.total_unassigned,
+            "lunch_violations": result.quality_metrics.lunch_violations,
+            "consecutive_blocks_violations": result.quality_metrics.consecutive_blocks_violations,
+            "gap_violations": result.quality_metrics.gap_violations,
+            "balance_score": result.quality_metrics.balance_score,
+            "daily_overload_count": result.quality_metrics.daily_overload_count,
+            "avg_daily_load": result.quality_metrics.avg_daily_load,
+            "max_daily_load": result.quality_metrics.max_daily_load,
+            "timeslot_utilization": result.quality_metrics.timeslot_utilization,
+            "unassigned_count": result.quality_metrics.unassigned_count,
+        },
+    }
 
 
 @router.post("/assignments/save", response_model=List[ScheduleSlotOut])

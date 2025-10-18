@@ -14,6 +14,8 @@ import {
   Divider,
   Group,
   Loader,
+  NumberInput,
+  Paper,
   SegmentedControl,
   ScrollArea,
   Select,
@@ -25,6 +27,7 @@ import {
   TextInput,
   Title,
   Tooltip,
+  Switch,
 } from '@mantine/core'
 import {
   IconAward,
@@ -43,6 +46,8 @@ import {
   IconSchool,
   IconTrash,
   IconUsersGroup,
+  IconCalendarPlus,
+  IconAlertTriangle,
 } from '@tabler/icons-react'
 import { api } from '../lib/api'
 import SchedulePlanner from './components/SchedulePlanner'
@@ -62,6 +67,519 @@ type Section = {
   fields: Field[]
   description: string
   icon: React.ComponentType<{ size?: number | string }>
+}
+
+const WEEKDAY_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+
+type TimeslotRecord = {
+  id?: number
+  day_of_week: number
+  start_time: string
+  end_time: string
+  campus?: string | null
+  comment?: string | null
+}
+
+type TimeslotOverviewProps = {
+  slots: TimeslotRecord[]
+  onDelete: (id: number) => Promise<void> | void
+}
+
+function TimeslotOverview({ slots, onDelete }: TimeslotOverviewProps) {
+  const grouped = useMemo(() => {
+    const map = new Map<number, TimeslotRecord[]>()
+    for (const slot of slots) {
+      const day = Number(slot.day_of_week)
+      const list = map.get(day)
+      if (list) {
+        list.push(slot)
+      } else {
+        map.set(day, [slot])
+      }
+    }
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const records = map.get(index) ?? []
+      records.sort((a, b) => {
+        const aMinutes = parseTimeString(normalizeTimeString(String(a.start_time ?? ''))) ?? 0
+        const bMinutes = parseTimeString(normalizeTimeString(String(b.start_time ?? ''))) ?? 0
+        return aMinutes - bMinutes
+      })
+      return {
+        day: index,
+        label: WEEKDAY_LABELS[index] ?? `Día ${index}`,
+        records,
+      }
+    })
+    return days
+  }, [slots])
+
+  const total = slots.length
+  const hasAny = total > 0
+
+  return (
+    <Card withBorder radius="lg" padding="lg">
+      <Stack gap="md">
+        <Group justify="space-between" align="center">
+          <div>
+            <Text size="xs" tt="uppercase" fw={600} c="dimmed">
+              Vista rápida de bloques
+            </Text>
+            <Title order={4}>Distribución semanal</Title>
+            <Text size="sm" c="dimmed">
+              Explora los bloques existentes agrupados por día y gestiona rápidamente los que ya no necesitas.
+            </Text>
+          </div>
+          <Badge color="indigo" variant="light">
+            {total} bloque{total === 1 ? '' : 's'}
+          </Badge>
+        </Group>
+
+        {!hasAny ? (
+          <Stack align="center" gap="xs" py="lg">
+            <IconDatabase size={32} color="var(--mantine-color-gray-5)" />
+            <Text size="sm" c="dimmed" ta="center">
+              Aún no hay bloques registrados. Usa el generador o el formulario para añadir la primera jornada.
+            </Text>
+          </Stack>
+        ) : (
+          <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="md">
+            {grouped.map((day) => (
+              <Card key={day.day} withBorder radius="md" padding="md">
+                <Stack gap="sm">
+                  <Group justify="space-between" align="center">
+                    <Text fw={600}>{day.label}</Text>
+                    <Badge color={day.records.length > 0 ? 'blue' : 'gray'} variant="light">
+                      {day.records.length} bloque{day.records.length === 1 ? '' : 's'}
+                    </Badge>
+                  </Group>
+                  {day.records.length === 0 ? (
+                    <Text size="xs" c="dimmed">
+                      Sin bloques asignados para este día.
+                    </Text>
+                  ) : (
+                    <Stack gap={8}>
+                      {day.records.map((slot) => {
+                        const start = normalizeTimeString(String(slot.start_time ?? ''))
+                        const end = normalizeTimeString(String(slot.end_time ?? ''))
+                        return (
+                          <Paper key={slot.id ?? `${day.day}-${start}-${end}`} withBorder radius="md" p="sm">
+                            <Group justify="space-between" align="center" gap="sm">
+                              <div>
+                                <Text size="sm" fw={500}>
+                                  {start} – {end}
+                                </Text>
+                                {slot.comment ? (
+                                  <Text size="xs" c="dimmed">
+                                    {slot.comment}
+                                  </Text>
+                                ) : null}
+                              </div>
+                              <Group gap={6} align="center">
+                                {slot.campus ? (
+                                  <Badge size="sm" variant="light" color="gray">
+                                    {slot.campus}
+                                  </Badge>
+                                ) : null}
+                                {typeof slot.id === 'number' ? (
+                                  <Tooltip label="Eliminar bloque" withArrow>
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="red"
+                                      size="sm"
+                                      aria-label="Eliminar bloque"
+                                      onClick={() => onDelete(slot.id as number)}
+                                    >
+                                      <IconTrash size={14} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                ) : null}
+                              </Group>
+                            </Group>
+                          </Paper>
+                        )
+                      })}
+                    </Stack>
+                  )}
+                </Stack>
+              </Card>
+            ))}
+          </SimpleGrid>
+        )}
+      </Stack>
+    </Card>
+  )
+}
+
+function normalizeTimeString(value?: string | null) {
+  if (!value) return ''
+  const parts = value.split(':')
+  if (parts.length < 2) return value
+  const [hours, minutes] = parts
+  return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`
+}
+
+function parseTimeString(value: string) {
+  const trimmed = value.trim()
+  const match = trimmed.match(/^([0-2]?\d):([0-5]\d)$/)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23) return null
+  return hours * 60 + minutes
+}
+
+function minutesToTimeLabel(totalMinutes: number) {
+  const normalized = ((Math.round(totalMinutes) % (24 * 60)) + 24 * 60) % (24 * 60)
+  const hours = Math.floor(normalized / 60)
+  const minutes = normalized % 60
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+}
+
+type TimeslotBulkBuilderProps = {
+  existing: TimeslotRecord[]
+  onCreated: () => Promise<void> | void
+}
+
+function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) {
+  const [startTime, setStartTime] = useState('08:00')
+  const [blocksPerDay, setBlocksPerDay] = useState<number>(8)
+  const [durationMinutes, setDurationMinutes] = useState<number>(60)
+  const [includeGap, setIncludeGap] = useState(false)
+  const [gapMinutes, setGapMinutes] = useState<number>(10)
+  const [includeWeekends, setIncludeWeekends] = useState(false)
+  const [replaceExisting, setReplaceExisting] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  const normalizedExisting = useMemo(() =>
+    existing.map((slot) => ({
+      day_of_week: Number(slot.day_of_week),
+      start_time: normalizeTimeString(typeof slot.start_time === 'string' ? slot.start_time : String(slot.start_time ?? '')),
+      end_time: normalizeTimeString(typeof slot.end_time === 'string' ? slot.end_time : String(slot.end_time ?? '')),
+    })),
+  [existing])
+
+  const existingKeys = useMemo(() => {
+    const set = new Set<string>()
+    for (const slot of normalizedExisting) {
+      if (!slot.start_time || !slot.end_time) continue
+      set.add(`${slot.day_of_week}-${slot.start_time}-${slot.end_time}`)
+    }
+    return set
+  }, [normalizedExisting])
+
+  const startMinutes = useMemo(() => parseTimeString(startTime), [startTime])
+  const normalizedDuration = Math.max(0, Math.round(durationMinutes))
+  const normalizedBlocks = Math.max(0, Math.floor(blocksPerDay))
+  const normalizedGap = Math.max(0, includeGap ? Math.round(gapMinutes) : 0)
+
+  const validationError = useMemo(() => {
+    if (startMinutes == null) return 'Ingresa una hora de inicio válida (HH:MM).'
+    if (!Number.isFinite(normalizedDuration) || normalizedDuration <= 0) return 'La duración debe ser mayor a 0 minutos.'
+    if (!Number.isFinite(normalizedBlocks) || normalizedBlocks <= 0) return 'Define cuántos bloques habrá por día.'
+    if (includeGap && (!Number.isFinite(gapMinutes) || gapMinutes < 0)) return 'El espacio entre bloques no puede ser negativo.'
+    return null
+  }, [gapMinutes, includeGap, normalizedBlocks, normalizedDuration, startMinutes])
+
+  const dayIndexes = useMemo(() => (includeWeekends ? [0, 1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4]), [includeWeekends])
+
+  const preview = useMemo(() => {
+    if (validationError) {
+      return { overflow: false, days: [] as { day: number; label: string; slots: { start: string; end: string; exists: boolean }[] }[] }
+    }
+    if (startMinutes == null || normalizedDuration <= 0 || normalizedBlocks <= 0) {
+      return { overflow: false, days: [] as { day: number; label: string; slots: { start: string; end: string; exists: boolean }[] }[] }
+    }
+    let overflow = false
+    const days = dayIndexes.map((day) => {
+      const slots: { start: string; end: string; exists: boolean }[] = []
+      for (let index = 0; index < normalizedBlocks; index += 1) {
+        const offset = index * (normalizedDuration + normalizedGap)
+        const slotStart = startMinutes + offset
+        const slotEnd = slotStart + normalizedDuration
+        if (slotEnd > 24 * 60) {
+          overflow = true
+          break
+        }
+        const startLabel = minutesToTimeLabel(slotStart)
+        const endLabel = minutesToTimeLabel(slotEnd)
+        const exists = existingKeys.has(`${day}-${startLabel}-${endLabel}`)
+        slots.push({ start: startLabel, end: endLabel, exists })
+      }
+      return {
+        day,
+        label: WEEKDAY_LABELS[day] ?? `Día ${day}`,
+        slots,
+      }
+    })
+    return { overflow, days }
+  }, [dayIndexes, existingKeys, normalizedBlocks, normalizedDuration, normalizedGap, startMinutes, validationError])
+
+  const totalBlocks = useMemo(() => preview.days.reduce((acc, day) => acc + day.slots.length, 0), [preview.days])
+  const duplicateBlocks = useMemo(() => preview.days.reduce((acc, day) => acc + day.slots.filter((slot) => slot.exists).length, 0), [preview.days])
+  const newBlocks = totalBlocks - duplicateBlocks
+
+  const actionableBlocks = replaceExisting ? totalBlocks : newBlocks
+
+  const canSubmit = !validationError && !preview.overflow && actionableBlocks > 0 && !creating
+  const ignoredBlocks = replaceExisting ? 0 : Math.max(duplicateBlocks, 0)
+
+  const handleGenerate = async () => {
+    if (!canSubmit) return
+    setFeedback(null)
+    setCreating(true)
+    try {
+      const payloads = preview.days.flatMap((day) =>
+        day.slots
+          .filter((slot) => replaceExisting || !slot.exists)
+          .map((slot) => ({
+            day_of_week: day.day,
+            start_time: `${slot.start}:00`,
+            end_time: `${slot.end}:00`,
+          }))
+      )
+      if (payloads.length === 0) {
+        setFeedback({ type: 'error', message: 'No hay bloques para generar con la configuración actual.' })
+        return
+      }
+
+      const response = await api.post('/timeslots/bulk', {
+        replace_existing: replaceExisting,
+        slots: payloads,
+      })
+      const result = response?.data ?? {}
+      const parseCount = (value: unknown, fallback: number) => {
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+        const numeric = Number(value)
+        return Number.isFinite(numeric) ? numeric : fallback
+      }
+      const created = parseCount(result?.created, payloads.length)
+      const skipped = parseCount(result?.skipped, replaceExisting ? 0 : duplicateBlocks)
+      const removedTimeslots = parseCount(result?.removed_timeslots, replaceExisting ? existing.length : 0)
+      const removedSchedules = parseCount(result?.removed_course_schedules, 0)
+      await Promise.resolve(onCreated())
+
+      const fragments: string[] = []
+      const createdVerb = created === 1 ? 'Se generó' : 'Se generaron'
+      fragments.push(`${createdVerb} ${created} bloque${created === 1 ? '' : 's'}.`)
+      if (skipped > 0) {
+        const skippedVerb = skipped === 1 ? 'Se omitió' : 'Se omitieron'
+        fragments.push(`${skippedVerb} ${skipped} duplicado${skipped === 1 ? '' : 's'}.`)
+      }
+      if (removedTimeslots > 0) {
+        const removedVerb = removedTimeslots === 1 ? 'Se eliminó' : 'Se eliminaron'
+        fragments.push(`${removedVerb} ${removedTimeslots} bloque${removedTimeslots === 1 ? '' : 's'} anterior${removedTimeslots === 1 ? '' : 'es'}.`)
+      }
+      if (removedSchedules > 0) {
+        const cleanedVerb = removedSchedules === 1 ? 'Se limpió' : 'Se limpiaron'
+        fragments.push(`${cleanedVerb} ${removedSchedules} horario${removedSchedules === 1 ? '' : 's'} asignado${removedSchedules === 1 ? '' : 's'}.`)
+      }
+      setFeedback({ type: 'success', message: fragments.join(' ') })
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail || e?.message || 'No se pudieron crear los bloques'
+      setFeedback({ type: 'error', message: detail })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const infoSummary = useMemo(() => {
+    if (validationError || preview.days.length === 0) return ''
+    const base = includeWeekends
+      ? 'Se configurarán bloques de lunes a domingo.'
+      : 'Se configurarán bloques de lunes a viernes.'
+    if (replaceExisting && existing.length > 0) {
+      return `${base} Esta recreación eliminará ${existing.length} bloque${existing.length === 1 ? '' : 's'} actual${existing.length === 1 ? '' : 'es'} y los horarios que dependan de ellos.`
+    }
+    return base
+  }, [existing.length, includeWeekends, preview.days.length, replaceExisting, validationError])
+
+  const allExisting = !replaceExisting && !validationError && !preview.overflow && totalBlocks > 0 && newBlocks === 0
+
+  return (
+    <Card withBorder radius="lg" padding="lg">
+      <Stack gap="md">
+        <Group justify="space-between" align="flex-start">
+          <div>
+            <Text size="xs" tt="uppercase" fw={600} c="dimmed">
+              Generador semanal
+            </Text>
+            <Title order={4}>Crear bloques en lote</Title>
+            <Text size="sm" c="dimmed">
+              Define la jornada base y dejamos listos los bloques lectivos para cada día.
+            </Text>
+          </div>
+          <Badge color={replaceExisting ? 'red' : 'indigo'} variant="light" leftSection={<IconCalendarPlus size={14} />}>
+            {replaceExisting ? `${totalBlocks} planificados` : `${newBlocks} nuevos`}
+          </Badge>
+        </Group>
+
+        {feedback && (
+          <Alert color={feedback.type === 'success' ? 'teal' : 'red'} variant="light" title={feedback.type === 'success' ? 'Bloques generados' : 'No se pudo completar'}>
+            {feedback.message}
+          </Alert>
+        )}
+
+        {replaceExisting && existing.length > 0 && (
+          <Alert color="red" variant="light" title="Recreación completa" icon={<IconAlertTriangle size={16} />}>
+            Se eliminarán {existing.length} bloque{existing.length === 1 ? '' : 's'} actual{existing.length === 1 ? '' : 'es'} y cualquier horario de curso asociado antes de crear la nueva jornada.
+          </Alert>
+        )}
+
+        {validationError && (
+          <Alert color="yellow" variant="light" title="Revisa la configuración" icon={<IconAlertTriangle size={16} />}>
+            {validationError}
+          </Alert>
+        )}
+
+        {preview.overflow && !validationError && (
+          <Alert color="yellow" variant="light" title="Jornada supera el día" icon={<IconAlertTriangle size={16} />}>
+            Ajusta la duración o la cantidad de bloques para que terminen antes de medianoche.
+          </Alert>
+        )}
+
+        {allExisting && (
+          <Alert color="blue" variant="light" title="Sin cambios necesarios">
+            Todos los bloques calculados ya estaban dados de alta.
+          </Alert>
+        )}
+
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+          <Stack gap={4}>
+            <TextInput
+              label="Hora de inicio"
+              value={startTime}
+              onChange={(event) => setStartTime(event.currentTarget.value)}
+              placeholder="08:00"
+            />
+            <Text size="xs" c="dimmed">
+              Formato HH:MM (24h)
+            </Text>
+          </Stack>
+          <NumberInput
+            label="Duración de cada bloque (minutos)"
+            min={15}
+            step={5}
+            value={durationMinutes}
+            onChange={(value) => setDurationMinutes(typeof value === 'number' ? value : Number(value) || 0)}
+          />
+          <NumberInput
+            label="Bloques por día"
+            min={1}
+            max={12}
+            value={blocksPerDay}
+            onChange={(value) => setBlocksPerDay(typeof value === 'number' ? value : Number(value) || 0)}
+          />
+        </SimpleGrid>
+
+        <Group gap="md" align="flex-end" wrap="wrap">
+          <Switch
+            label="Espacio entre bloques"
+            description="Inserta recreos entre clases"
+            checked={includeGap}
+            onChange={(event) => setIncludeGap(event.currentTarget.checked)}
+            aria-label="Espacio entre bloques"
+          />
+          <NumberInput
+            label="Minutos de descanso"
+            min={0}
+            step={5}
+            disabled={!includeGap}
+            value={gapMinutes}
+            onChange={(value) => setGapMinutes(typeof value === 'number' ? value : Number(value) || 0)}
+          />
+          <Switch
+            label="Incluir fines de semana"
+            description="Agrega sábado y domingo"
+            checked={includeWeekends}
+            onChange={(event) => setIncludeWeekends(event.currentTarget.checked)}
+            aria-label="Incluir fines de semana"
+          />
+          <Switch
+            label="Reemplazar bloques existentes"
+            description="Borra la jornada actual y recrea todos los bloques"
+            checked={replaceExisting}
+            color="red"
+            onChange={(event) => setReplaceExisting(event.currentTarget.checked)}
+            aria-label="Reemplazar bloques existentes"
+          />
+        </Group>
+
+        {infoSummary && (
+          <Text size="sm" c="dimmed">
+            {infoSummary}
+          </Text>
+        )}
+
+        <SimpleGrid cols={{ base: 1, md: 2, lg: includeWeekends ? 3 : 2 }} spacing="md">
+          {preview.days.map((day) => (
+            <Card key={day.day} withBorder radius="md" padding="md">
+              <Stack gap="xs">
+                <Group justify="space-between" align="center">
+                  <Text fw={600}>{day.label}</Text>
+                  <Badge color="blue" variant="light">
+                    {day.slots.length} bloque{day.slots.length === 1 ? '' : 's'}
+                  </Badge>
+                </Group>
+                <Stack gap={4}>
+                  {day.slots.length === 0 ? (
+                    <Text size="xs" c="dimmed">
+                      Sin bloques configurados para este día.
+                    </Text>
+                  ) : (
+                    day.slots.map((slot, index) => (
+                      <Group key={`${day.day}-${slot.start}-${index}`} justify="space-between" align="center">
+                        <Text size="sm">
+                          {slot.start} – {slot.end}
+                        </Text>
+                        {slot.exists && !replaceExisting ? (
+                          <Badge color="gray" variant="light" size="sm">
+                            Existe
+                          </Badge>
+                        ) : null}
+                      </Group>
+                    ))
+                  )}
+                </Stack>
+              </Stack>
+            </Card>
+          ))}
+        </SimpleGrid>
+
+        <Group justify="space-between" align="center">
+          <Text size="sm" c="dimmed">
+            Total calculado: {totalBlocks} bloque{totalBlocks === 1 ? '' : 's'} · {replaceExisting ? `Planificados: ${totalBlocks}` : `Nuevos: ${Math.max(newBlocks, 0)}`} · Ignorados: {ignoredBlocks} · Acción: {replaceExisting ? 'Recrear jornada completa' : 'Agregar solo bloques nuevos'}
+          </Text>
+          <Group gap="sm">
+            <Button
+              variant="default"
+              onClick={() => {
+                setStartTime('08:00')
+                setBlocksPerDay(6)
+                setDurationMinutes(90)
+                setGapMinutes(10)
+                setIncludeGap(false)
+                setIncludeWeekends(false)
+                setReplaceExisting(false)
+                setFeedback(null)
+              }}
+            >
+              Restablecer
+            </Button>
+            <Button
+              color={replaceExisting ? 'red' : 'indigo'}
+              onClick={handleGenerate}
+              loading={creating}
+              disabled={!canSubmit}
+            >
+              {replaceExisting ? 'Recrear bloques' : 'Generar bloques'}
+            </Button>
+          </Group>
+        </Group>
+      </Stack>
+    </Card>
+  )
 }
 
 function normalizePayload(fields: Field[], form: Record<string, any>) {
@@ -375,6 +893,13 @@ function CrudSection({ section }: { section: Section }) {
             <Alert color="teal" variant="light" title="Acción exitosa">
               {success}
             </Alert>
+          )}
+
+          {section.key === 'timeslots' && (
+            <Stack gap="md">
+              <TimeslotBulkBuilder existing={items as TimeslotRecord[]} onCreated={load} />
+              <TimeslotOverview slots={items as TimeslotRecord[]} onDelete={(id) => onDelete(id)} />
+            </Stack>
           )}
 
           <form onSubmit={handleSubmit(onSubmit)}>

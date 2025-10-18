@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Title, Text, Group, Avatar, Badge, ActionIcon, Tooltip, Modal, Button, Stack } from '@mantine/core'
+import { Title, Text, Group, Avatar, Badge, ActionIcon, Tooltip, Modal, Button, Stack, useMantineColorScheme } from '@mantine/core'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import {
@@ -11,6 +11,8 @@ import {
   IconCalendarStats,
   IconUserCheck,
   IconSettings,
+  IconMoon,
+  IconSun,
 } from '@tabler/icons-react'
 
 export default function DashboardLayout({ title, subtitle, actions, children }: {
@@ -20,8 +22,11 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   children: React.ReactNode
 }) {
   const [collapsed, setCollapsed] = useState(false)
+  const [dragStartX, setDragStartX] = useState<number | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const navigate = useNavigate()
   const { token: authToken } = useAuth()
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
   const [storedToken, setStoredToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
     try { return localStorage.getItem('authToken') } catch { return null }
@@ -49,25 +54,79 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
     { label: 'Asistencia', to: '#', icon: IconUserCheck },
     { label: 'Ajustes', to: '#', icon: IconSettings },
   ]), [])
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setDragStartX(e.clientX)
+    setIsDragging(true)
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || dragStartX === null) return
+
+    const deltaX = e.clientX - dragStartX
+    const threshold = 20
+
+    if (Math.abs(deltaX) > threshold) {
+      if (deltaX > 0 && collapsed) {
+        setCollapsed(false)
+        setIsDragging(false)
+        setDragStartX(null)
+      } else if (deltaX < 0 && !collapsed) {
+        setCollapsed(true)
+        setIsDragging(false)
+        setDragStartX(null)
+      }
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+    setDragStartX(null)
+  }
+
+  const handleMouseLeave = () => {
+    setIsDragging(false)
+    setDragStartX(null)
+  }
+
+  const sidebarBg = colorScheme === 'dark'
+    ? (isDragging 
+        ? 'linear-gradient(180deg, rgba(99,102,241,0.15), rgba(2,6,23,0.85), rgba(15,23,42,0.9))'
+        : 'linear-gradient(180deg, rgba(2,6,23,0.85), rgba(15,23,42,0.9))')
+    : (isDragging
+        ? 'linear-gradient(180deg, rgba(99,102,241,0.08), rgba(248,250,252,0.95), rgba(241,245,249,0.98))'
+        : 'linear-gradient(180deg, rgba(248,250,252,0.95), rgba(241,245,249,0.98))')
+
+  const sidebarTextColor = colorScheme === 'dark' ? 'white' : '#1e293b'
+  const sidebarBorder = colorScheme === 'dark' ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(226,232,240,0.8)'
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: collapsed ? '84px 1fr' : '240px 1fr', minHeight: '100svh', transition: 'grid-template-columns 220ms ease' }}>
-      <aside style={{
-        borderRight: '1px solid var(--mantine-color-dark-5, #1f2937)',
-        background: 'linear-gradient(180deg, rgba(2,6,23,0.85), rgba(15,23,42,0.9))',
-        color: 'white',
-        padding: collapsed ? '16px 10px' : 16,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: collapsed ? 'center' : 'stretch',
-        gap: collapsed ? 28 : 16,
-        transition: 'padding 220ms ease'
-      }}>
+      <aside 
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        style={{
+          borderRight: sidebarBorder,
+          background: sidebarBg,
+          color: sidebarTextColor,
+          padding: collapsed ? '16px 10px' : 16,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: collapsed ? 'center' : 'stretch',
+          gap: collapsed ? 28 : 16,
+          transition: isDragging ? 'background 150ms ease' : 'padding 220ms ease, background 150ms ease',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: isDragging ? 'none' : 'auto',
+        }}
+      >
         <div style={{ position: 'sticky', top: 16, display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch', gap: collapsed ? 24 : 16 }}>
           <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between', gap: collapsed ? 16 : 12 }}>
             <Title
               order={3}
               style={{
-                color: 'white',
+                color: sidebarTextColor,
                 margin: 0,
                 writingMode: collapsed ? 'vertical-rl' as any : 'horizontal-tb',
                 textOrientation: collapsed ? 'upright' as any : 'mixed',
@@ -107,8 +166,10 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
                     style={{
                       width: 44,
                       height: 44,
-                      border: isActive ? '1px solid rgba(99,102,241,0.45)' : '1px solid rgba(255,255,255,0.12)',
-                      color: 'white'
+                      border: isActive 
+                        ? '1px solid rgba(99,102,241,0.45)' 
+                        : (colorScheme === 'dark' ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(100,116,139,0.2)'),
+                      color: sidebarTextColor
                     }}
                   >
                     <IconComponent size={20} />
@@ -119,11 +180,13 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
                   key={item.label}
                   to={item.to}
                   style={{
-                    color: 'white',
+                    color: sidebarTextColor,
                     textDecoration: 'none',
                     padding: '10px 12px',
                     borderRadius: 10,
-                    background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    background: isActive 
+                      ? (colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(99,102,241,0.08)') 
+                      : 'transparent',
                     transition: 'background 180ms ease',
                     fontWeight: 500,
                   }}
@@ -133,6 +196,31 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
               )
             })}
           </nav>
+          <div style={{ 
+            marginTop: 'auto', 
+            paddingTop: 16, 
+            borderTop: colorScheme === 'dark' ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(100,116,139,0.2)',
+            display: 'flex',
+            justifyContent: 'center'
+          }}>
+            <Tooltip label={colorScheme === 'light' ? 'Modo oscuro' : 'Modo claro'} position="right" withinPortal>
+              <ActionIcon
+                variant="light"
+                color="gray"
+                size="lg"
+                onClick={() => setColorScheme(colorScheme === 'light' ? 'dark' : 'light')}
+                aria-label={colorScheme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+                style={{
+                  width: 44,
+                  height: 44,
+                  border: colorScheme === 'dark' ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(100,116,139,0.2)',
+                  color: sidebarTextColor,
+                }}
+              >
+                {colorScheme === 'light' ? <IconMoon size={20} /> : <IconSun size={20} />}
+              </ActionIcon>
+            </Tooltip>
+          </div>
         </div>
       </aside>
       <main style={{ padding: collapsed ? '24px 20px' : '24px 28px', transition: 'padding 220ms ease' }}>

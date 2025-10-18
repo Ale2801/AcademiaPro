@@ -24,10 +24,13 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(subject: str, expires_minutes: Optional[int] = None, extra: Optional[Dict[str, Any]] = None) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes or settings.access_token_expire_minutes)
-    to_encode: Dict[str, Any] = {"sub": subject, "exp": int(expire.timestamp())}
+    effective_minutes = expires_minutes if expires_minutes is not None else settings.access_token_expire_minutes
+    to_encode: Dict[str, Any] = {"sub": subject}
     if extra:
         to_encode.update(extra)
+    if effective_minutes is not None and effective_minutes > 0:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=effective_minutes)
+        to_encode["exp"] = int(expire.timestamp())
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 

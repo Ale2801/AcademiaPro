@@ -11,15 +11,19 @@ import {
   MultiSelect,
   NumberInput,
   Select,
+  SelectProps,
   SimpleGrid,
   Stack,
   Switch,
   Text,
   Title,
+  useMantineColorScheme,
+  useMantineTheme,
 } from '@mantine/core'
 import {
   IconCalendarCog,
   IconDeviceFloppy,
+  IconCheck,
   IconRefresh,
   IconRun,
   IconUsersGroup,
@@ -129,14 +133,35 @@ type OptimizerUnassigned = {
   remaining_minutes: number
 }
 
+type QualityMetrics = {
+  total_assigned: number
+  balance_score: number
+  avg_daily_load: number
+  max_daily_load: number
+  daily_overload_count: number
+  timeslot_utilization: number
+  unassigned_count: number
+}
+
 type OptimizerResponse = {
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
+  quality_metrics?: QualityMetrics
 }
 
 type PlannerDialog =
   | { type: 'create'; courseId: number; timeslotId: number }
   | { type: 'edit'; assignment: ScheduleEntry; targetTimeslotId?: number }
+
+type PlannerSelectOption = {
+  value: string
+  label: string
+  description?: string
+  group?: string
+  disabled?: boolean
+  leftSection?: React.ReactNode
+  rightSection?: React.ReactNode
+}
 
 function timeStringToMinutes(value?: string | null): number | null {
   if (!value) return null
@@ -203,9 +228,17 @@ export default function SchedulePlanner() {
   const [optimizerAssignments, setOptimizerAssignments] = useState<Assignment[]>([])
   const [optimizerPreview, setOptimizerPreview] = useState<ScheduleEntry[]>([])
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
+  const [globalSchedule, setGlobalSchedule] = useState<ScheduleEntry[]>([])
 
   const [requireBreaks, setRequireBreaks] = useState(true)
   const [maxConsecutiveBlocks, setMaxConsecutiveBlocks] = useState(3)
+  
+  // Nuevas opciones del optimizador
+  const [enableLunchBlocks, setEnableLunchBlocks] = useState(false)
+  const [minGapMinutes, setMinGapMinutes] = useState(15)
+  const [maxDailyHours, setMaxDailyHours] = useState(6)
+  const [balanceWeight, setBalanceWeight] = useState(0.3)
+  const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
 
   const [selectedCourseForStudents, setSelectedCourseForStudents] = useState<string | null>(null)
   const [selectedStudents, setSelectedStudents] = useState<string[]>([])
@@ -216,7 +249,11 @@ export default function SchedulePlanner() {
   const [dialogDuration, setDialogDuration] = useState<number | null>(null)
   const [dialogOffset, setDialogOffset] = useState<number | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [dialogErrorSeverity, setDialogErrorSeverity] = useState<'warning' | 'error'>('warning')
   const [dialogManualAdjust, setDialogManualAdjust] = useState(false)
+
+  const theme = useMantineTheme()
+  const { colorScheme } = useMantineColorScheme()
 
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user.full_name])), [users])
   const subjectMap = useMemo(() => new Map(subjects.map((subject) => [subject.id, subject.name])), [subjects])
@@ -272,14 +309,16 @@ export default function SchedulePlanner() {
     setError(null)
     try {
       const params = { params: { program_semester_id: semesterId } }
-      const [coursesRes, scheduleRes, enrollmentsRes] = await Promise.all([
+      const [coursesRes, scheduleRes, enrollmentsRes, globalScheduleRes] = await Promise.all([
         api.get('/courses/', params),
         api.get('/schedule/overview', params),
         api.get('/enrollments/'),
+        api.get('/schedule/overview'),
       ])
       const coursesData = coursesRes.data as Course[]
       const scheduleData = scheduleRes.data as ScheduleEntry[]
       const enrollmentsData = enrollmentsRes.data as Enrollment[]
+      const globalScheduleData = globalScheduleRes.data as ScheduleEntry[]
 
       const relevantCourseIds = new Set(coursesData.map((course) => course.id))
       const map: Record<number, number[]> = {}
@@ -292,7 +331,8 @@ export default function SchedulePlanner() {
       }
 
       setCourses(coursesData)
-      setSchedule(scheduleData)
+    setSchedule(scheduleData)
+    setGlobalSchedule(globalScheduleData)
       setCourseStudentMap(map)
       setOptimizerAssignments([])
       setOptimizerPreview([])
@@ -338,6 +378,7 @@ export default function SchedulePlanner() {
     } else {
       setCourses([])
       setSchedule([])
+      setGlobalSchedule([])
       setCourseStudentMap({})
     }
   }, [selectedSemester, loadSemesterData])
@@ -372,7 +413,7 @@ export default function SchedulePlanner() {
     [courses, subjectMap],
   )
 
-  const timeslotOptions = useMemo(
+  const timeslotOptions = useMemo<PlannerSelectOption[]>(
     () =>
       timeslots
         .slice()
@@ -388,7 +429,7 @@ export default function SchedulePlanner() {
     [timeslots],
   )
 
-  const roomOptions = useMemo(
+  const roomOptions = useMemo<PlannerSelectOption[]>(
     () =>
       rooms.map((room) => ({
         value: String(room.id),
@@ -448,8 +489,9 @@ export default function SchedulePlanner() {
       const parts = [subjectName]
       if (course.group) parts.push(`Grupo ${course.group}`)
       const label = parts.join(' · ')
-  const rawWeekly = typeof course.weekly_hours === 'number' ? course.weekly_hours : Number(course.weekly_hours ?? 0)
-  const weeklyHours = Number.isFinite(rawWeekly) ? Math.max(rawWeekly, 0) : 0
+      const rawWeekly =
+        typeof course.weekly_hours === 'number' ? course.weekly_hours : Number(course.weekly_hours ?? 0)
+      const weeklyHours = Number.isFinite(rawWeekly) ? Math.max(rawWeekly, 0) : 0
       return {
         id: course.id,
         label,
@@ -539,9 +581,16 @@ export default function SchedulePlanner() {
     return map
   }, [schedule, timeslotMap])
 
+  const allocationEntries = useMemo(() => {
+    if (globalSchedule.length > 0) {
+      return globalSchedule
+    }
+    return schedule
+  }, [globalSchedule, schedule])
+
   const roomAllocationMap = useMemo(() => {
     const map = new Map<string, RoomAllocation>()
-    for (const entry of schedule) {
+    for (const entry of allocationEntries) {
       if (entry.timeslot_id == null || entry.room_id == null) continue
       const slot = timeslotMap.get(entry.timeslot_id)
       if (!slot) continue
@@ -578,7 +627,74 @@ export default function SchedulePlanner() {
       allocation.segments.sort((a, b) => a.start - b.start)
     }
     return map
-  }, [schedule, timeslotMap, timeslotDurationMinutesMap])
+  }, [allocationEntries, timeslotMap, timeslotDurationMinutesMap])
+
+  const roomTimeslotEntryMap = useMemo(() => {
+    const map = new Map<string, ScheduleEntry[]>()
+    for (const entry of allocationEntries) {
+      if (entry.room_id == null || entry.timeslot_id == null) continue
+      const key = `${entry.room_id}-${entry.timeslot_id}`
+      const bucket = map.get(key) ?? []
+      bucket.push(entry)
+      map.set(key, bucket)
+    }
+    for (const bucket of map.values()) {
+      bucket.sort((a, b) => {
+        const nameCompare = (a.course_name ?? '').localeCompare(b.course_name ?? '')
+        if (nameCompare !== 0) return nameCompare
+        const programCompare = (a.program_semester_label ?? '').localeCompare(b.program_semester_label ?? '')
+        if (programCompare !== 0) return programCompare
+        return (a.course_id ?? 0) - (b.course_id ?? 0)
+      })
+    }
+    return map
+  }, [allocationEntries])
+
+  const resolveProgramLabel = useCallback(
+    (entry: ScheduleEntry) => {
+      if (entry.program_semester_label) return entry.program_semester_label
+      if (entry.program_semester_id != null) {
+        const semester = semesterMap.get(entry.program_semester_id)
+        if (semester) {
+          const program = programMap.get(semester.program_id)
+          const baseLabel = semester.label || `Semestre ${semester.semester_number}`
+          if (program) {
+            return baseLabel ? `${program.name} · ${baseLabel}` : program.name
+          }
+          return baseLabel ?? ''
+        }
+      }
+      return ''
+    },
+    [programMap, semesterMap],
+  )
+
+  const describeConflictOccupants = useCallback(
+    (roomId: number, timeslotId: number, ignoreAssignmentId?: number | null) => {
+      const key = `${roomId}-${timeslotId}`
+      const occupants = roomTimeslotEntryMap.get(key) ?? []
+      const filtered = occupants.filter((entry) => (ignoreAssignmentId == null || entry.id !== ignoreAssignmentId))
+      if (filtered.length === 0) {
+        return null
+      }
+      const lines: string[] = []
+      const maxEntries = 2
+      filtered.slice(0, maxEntries).forEach((entry) => {
+        const courseLabel = entry.course_name ?? `Curso #${entry.course_id}`
+        lines.push(courseLabel)
+        const programLabel = resolveProgramLabel(entry)
+        if (programLabel) {
+          lines.push(programLabel)
+        }
+      })
+      if (filtered.length > maxEntries) {
+        const remaining = filtered.length - maxEntries
+        lines.push(`+${remaining} adicional${remaining > 1 ? 'es' : ''}`)
+      }
+      return lines.join('\n')
+    },
+    [roomTimeslotEntryMap, resolveProgramLabel],
+  )
 
   const getRoomAvailability = useCallback(
     (roomId: number | null, timeslotId: number | null, ignoreAssignmentId?: number | null) => {
@@ -684,6 +800,7 @@ export default function SchedulePlanner() {
       setDialogDuration(null)
       setDialogOffset(null)
       setDialogError(null)
+      setDialogErrorSeverity('warning')
       return
     }
 
@@ -774,12 +891,15 @@ export default function SchedulePlanner() {
     setDialogDuration(durationCandidate != null ? Math.max(Math.round(durationCandidate), 0) : null)
     setDialogOffset(offsetCandidate != null ? Math.max(Math.round(offsetCandidate), 0) : null)
     setDialogError(error)
+    setDialogErrorSeverity('warning')
   }, [dialog, schedule, roomOptions, computeEntryAllocation, getRoomAvailability, courseSummaryMap])
 
   useEffect(() => {
     if (!dialog) return
+    if (dialogErrorSeverity === 'error') return
     if (!dialogRoom || !dialogTimeslot) {
       setDialogError('Selecciona una sala y bloque horario.')
+      setDialogErrorSeverity('warning')
       return
     }
     const roomIdNum = Number(dialogRoom)
@@ -788,11 +908,13 @@ export default function SchedulePlanner() {
     const availability = getRoomAvailability(roomIdNum, timeslotIdNum, assignmentId ?? null)
     if (!availability) {
       setDialogError('No se pudo calcular la disponibilidad del bloque seleccionado.')
+      setDialogErrorSeverity('warning')
       return
     }
     const gaps = availability.freeSegments
     if (gaps.length === 0) {
       setDialogError('No hay espacio disponible en este bloque para la sala seleccionada.')
+      setDialogErrorSeverity('warning')
       if (!dialogManualAdjust) {
         if (dialogOffset !== 0) setDialogOffset(0)
         if (dialogDuration !== 0) setDialogDuration(0)
@@ -807,6 +929,7 @@ export default function SchedulePlanner() {
         setDialogDuration(firstGap.end - firstGap.start)
         setDialogManualAdjust(false)
         setDialogError(null)
+        setDialogErrorSeverity('warning')
       }
       return
     }
@@ -814,6 +937,7 @@ export default function SchedulePlanner() {
     const fits = gaps.some((gap) => dialogOffset >= gap.start && dialogOffset + dialogDuration <= gap.end + 0.001)
     if (fits) {
       setDialogError(null)
+      setDialogErrorSeverity('warning')
       return
     }
 
@@ -825,6 +949,7 @@ export default function SchedulePlanner() {
       }
       setDialogManualAdjust(false)
       setDialogError('Se ajustó la clase para caber en el espacio disponible.')
+      setDialogErrorSeverity('warning')
       return
     }
 
@@ -834,11 +959,13 @@ export default function SchedulePlanner() {
       if (dialogDuration !== fallbackGap.end - fallbackGap.start) setDialogDuration(fallbackGap.end - fallbackGap.start)
       setDialogManualAdjust(false)
       setDialogError('Se ajustó la clase para caber en el espacio disponible.')
+      setDialogErrorSeverity('warning')
       return
     }
 
     setDialogError('La duración y posición seleccionadas no caben en este bloque. Ajusta los valores manualmente.')
-  }, [dialog, dialogRoom, dialogTimeslot, dialogDuration, dialogOffset, dialogManualAdjust, getRoomAvailability])
+    setDialogErrorSeverity('warning')
+  }, [dialog, dialogRoom, dialogTimeslot, dialogDuration, dialogOffset, dialogManualAdjust, getRoomAvailability, dialogErrorSeverity])
 
   const courseLookup = useMemo(() => {
     const map = new Map<number, { label: string; term?: string }>()
@@ -865,11 +992,13 @@ export default function SchedulePlanner() {
     setOptimizerLoading(true)
     setError(null)
     setSuccess(null)
+    setQualityMetrics(null)
     try {
       const coursesPayload = courses.map((course) => ({
         course_id: course.id,
         teacher_id: course.teacher_id ?? -course.id,
         weekly_hours: Math.max(course.weekly_hours ?? 1, 1),
+        program_semester_id: Number(selectedSemester),
       }))
 
       const roomsPayload = rooms.map((room) => ({ room_id: room.id, capacity: room.capacity }))
@@ -884,6 +1013,17 @@ export default function SchedulePlanner() {
         }
       }
 
+      // Generar lunch_blocks si está habilitado (Lun-Vie 12:00-14:00)
+      const lunchBlocks: [number, number][] | undefined = enableLunchBlocks
+        ? [
+            [0, 12], [0, 13], // Lunes
+            [1, 12], [1, 13], // Martes
+            [2, 12], [2, 13], // Miércoles
+            [3, 12], [3, 13], // Jueves
+            [4, 12], [4, 13], // Viernes
+          ]
+        : undefined
+
       const payload = {
         courses: coursesPayload,
         rooms: roomsPayload,
@@ -892,6 +1032,10 @@ export default function SchedulePlanner() {
           teacher_availability: availability,
           max_consecutive_blocks: maxConsecutiveBlocks,
           min_gap_blocks: requireBreaks ? 1 : 0,
+          min_gap_minutes: minGapMinutes,
+          max_daily_hours_per_program: maxDailyHours,
+          balance_weight: balanceWeight,
+          lunch_blocks: lunchBlocks,
         },
       }
 
@@ -935,6 +1079,12 @@ export default function SchedulePlanner() {
       })
       setOptimizerAssignments(parsedAssignments)
       setOptimizerPreview(preview)
+      
+      // Guardar métricas de calidad si están disponibles
+      if (data.quality_metrics) {
+        setQualityMetrics(data.quality_metrics)
+      }
+      
       const unassigned = data.unassigned ?? []
       if (unassigned.length > 0) {
         const detail = unassigned
@@ -953,7 +1103,7 @@ export default function SchedulePlanner() {
     } finally {
       setOptimizerLoading(false)
     }
-  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxConsecutiveBlocks, requireBreaks, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
+  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxConsecutiveBlocks, requireBreaks, enableLunchBlocks, minGapMinutes, maxDailyHours, balanceWeight, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
 
   const handleApplyOptimized = useCallback(async () => {
     if (optimizerAssignments.length === 0) return
@@ -1078,6 +1228,7 @@ export default function SchedulePlanner() {
     setDialogDuration(null)
     setDialogOffset(null)
     setDialogError(null)
+    setDialogErrorSeverity('warning')
     setDialogManualAdjust(false)
   }
 
@@ -1121,7 +1272,8 @@ export default function SchedulePlanner() {
       setDialog(null)
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo guardar el bloque'
-      setError(detail)
+      setDialogError(detail)
+      setDialogErrorSeverity('error')
     } finally {
       setSaving(false)
     }
@@ -1136,6 +1288,182 @@ export default function SchedulePlanner() {
     const assignmentId = dialog.type === 'edit' ? dialog.assignment.id ?? null : null
     return getRoomAvailability(roomIdNum, timeslotIdNum, assignmentId ?? null)
   }, [dialog, dialogRoom, dialogTimeslot, getRoomAvailability])
+
+  const dialogAssignmentId = dialog?.type === 'edit' ? dialog.assignment.id ?? null : null
+  const desiredDurationMinutes = dialogDuration != null && dialogDuration > 0 ? dialogDuration : null
+
+  const dialogRoomOptionsData = useMemo(() => {
+    const conflictSet = new Set<string>()
+    const conflictDetails = new Map<string, string>()
+    const enhancedOptions = roomOptions.map((option) => {
+      const enhanced: PlannerSelectOption = { ...option }
+      if (!dialog || !dialogTimeslot) return enhanced
+      const roomId = Number(option.value)
+      const timeslotId = Number(dialogTimeslot)
+      if (Number.isNaN(roomId) || Number.isNaN(timeslotId)) return enhanced
+      const availability = getRoomAvailability(roomId, timeslotId, dialogAssignmentId ?? null)
+      if (!availability) {
+        conflictSet.add(option.value)
+        const detail = describeConflictOccupants(roomId, timeslotId, dialogAssignmentId ?? null)
+        if (detail) {
+          conflictDetails.set(option.value, detail)
+          enhanced.description = ['No se pudo obtener disponibilidad', detail].join('\n')
+        } else {
+          enhanced.description = 'No se pudo obtener disponibilidad'
+        }
+        return enhanced
+      }
+      const freeMinutes = availability.freeSegments.reduce((sum, gap) => sum + (gap.end - gap.start), 0)
+      const hasAnyGap = availability.freeSegments.some((gap) => gap.end - gap.start > 0)
+      const hasRequiredGap =
+        desiredDurationMinutes != null && desiredDurationMinutes > 0
+          ? availability.freeSegments.some((gap) => gap.end - gap.start >= desiredDurationMinutes)
+          : hasAnyGap
+      if (!hasRequiredGap) {
+        conflictSet.add(option.value)
+        const baseMessage = desiredDurationMinutes
+          ? `Sin espacio suficiente · Libre: ${formatMinutesLabel(freeMinutes)}`
+          : 'Sin espacio disponible'
+        const detail = describeConflictOccupants(roomId, timeslotId, dialogAssignmentId ?? null)
+        if (detail) {
+          conflictDetails.set(option.value, detail)
+          enhanced.description = [baseMessage, detail].join('\n')
+        } else {
+          enhanced.description = baseMessage
+        }
+      } else {
+        enhanced.description = `Libre: ${formatMinutesLabel(freeMinutes)}`
+      }
+      return enhanced
+    })
+    return { options: enhancedOptions, conflicts: conflictSet, details: conflictDetails }
+  }, [dialog, dialogTimeslot, roomOptions, getRoomAvailability, dialogAssignmentId, desiredDurationMinutes, describeConflictOccupants])
+
+  const dialogTimeslotOptionsData = useMemo(() => {
+    const conflictSet = new Set<string>()
+    const conflictDetails = new Map<string, string>()
+    const enhancedOptions = timeslotOptions.map((option) => {
+      const enhanced: PlannerSelectOption = { ...option }
+      if (!dialog || !dialogRoom) return enhanced
+      const roomId = Number(dialogRoom)
+      const timeslotId = Number(option.value)
+      if (Number.isNaN(roomId) || Number.isNaN(timeslotId)) return enhanced
+      const availability = getRoomAvailability(roomId, timeslotId, dialogAssignmentId ?? null)
+      if (!availability) {
+        conflictSet.add(option.value)
+        const detail = describeConflictOccupants(roomId, timeslotId, dialogAssignmentId ?? null)
+        if (detail) {
+          conflictDetails.set(option.value, detail)
+          enhanced.description = ['No se pudo obtener disponibilidad', detail].join('\n')
+        } else {
+          enhanced.description = 'No se pudo obtener disponibilidad'
+        }
+        return enhanced
+      }
+      const freeMinutes = availability.freeSegments.reduce((sum, gap) => sum + (gap.end - gap.start), 0)
+      const hasAnyGap = availability.freeSegments.some((gap) => gap.end - gap.start > 0)
+      const hasRequiredGap =
+        desiredDurationMinutes != null && desiredDurationMinutes > 0
+          ? availability.freeSegments.some((gap) => gap.end - gap.start >= desiredDurationMinutes)
+          : hasAnyGap
+      if (!hasRequiredGap) {
+        conflictSet.add(option.value)
+        const baseMessage = desiredDurationMinutes
+          ? `Sin espacio suficiente · Libre: ${formatMinutesLabel(freeMinutes)}`
+          : 'Sin espacio disponible'
+        const detail = describeConflictOccupants(roomId, timeslotId, dialogAssignmentId ?? null)
+        if (detail) {
+          conflictDetails.set(option.value, detail)
+          enhanced.description = [baseMessage, detail].join('\n')
+        } else {
+          enhanced.description = baseMessage
+        }
+      } else {
+        enhanced.description = `Libre: ${formatMinutesLabel(freeMinutes)}`
+      }
+      return enhanced
+    })
+    return { options: enhancedOptions, conflicts: conflictSet, details: conflictDetails }
+  }, [dialog, dialogRoom, timeslotOptions, getRoomAvailability, dialogAssignmentId, desiredDurationMinutes, describeConflictOccupants])
+
+  const selectedRoomIsConflicting = dialogRoom ? dialogRoomOptionsData.conflicts.has(dialogRoom) : false
+  const selectedTimeslotIsConflicting = dialogTimeslot ? dialogTimeslotOptionsData.conflicts.has(dialogTimeslot) : false
+  const selectedRoomConflictDetail = dialogRoom ? dialogRoomOptionsData.details.get(dialogRoom) ?? null : null
+  const selectedTimeslotConflictDetail = dialogTimeslot
+    ? dialogTimeslotOptionsData.details.get(dialogTimeslot) ?? null
+    : null
+
+  const renderRoomOption = useCallback<NonNullable<SelectProps['renderOption']>>(
+    ({ option, checked }) => {
+      const enrichedOption = option as PlannerSelectOption
+      const isConflict = dialogRoomOptionsData.conflicts.has(enrichedOption.value)
+      return (
+        <Group gap="sm" justify="space-between" wrap="nowrap" style={{ width: '100%' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              fw={500}
+              c={isConflict ? theme.colors.red[6] : undefined}
+              style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {enrichedOption.label}
+            </Text>
+            {enrichedOption.description && (
+              <Text
+                size="xs"
+                c={isConflict ? theme.colors.red[5] : 'dimmed'}
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.2,
+                  fontSize: '0.75rem',
+                }}
+              >
+                {enrichedOption.description}
+              </Text>
+            )}
+          </div>
+          {checked ? <IconCheck size={16} color={theme.colors.blue[6]} aria-hidden /> : null}
+        </Group>
+      )
+    },
+    [dialogRoomOptionsData, theme],
+  )
+
+  const renderTimeslotOption = useCallback<NonNullable<SelectProps['renderOption']>>(
+    ({ option, checked }) => {
+      const enrichedOption = option as PlannerSelectOption
+      const isConflict = dialogTimeslotOptionsData.conflicts.has(enrichedOption.value)
+      return (
+        <Group gap="sm" justify="space-between" wrap="nowrap" style={{ width: '100%' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text
+              fw={500}
+              c={isConflict ? theme.colors.red[6] : undefined}
+              style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {enrichedOption.label}
+            </Text>
+            {enrichedOption.description && (
+              <Text
+                size="xs"
+                c={isConflict ? theme.colors.red[5] : 'dimmed'}
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.2,
+                  fontSize: '0.75rem',
+                }}
+              >
+                {enrichedOption.description}
+              </Text>
+            )}
+          </div>
+          {checked ? <IconCheck size={16} color={theme.colors.blue[6]} aria-hidden /> : null}
+        </Group>
+      )
+    },
+    [dialogTimeslotOptionsData, theme],
+  )
 
   return (
     <Stack gap="xl">
@@ -1255,27 +1583,51 @@ export default function SchedulePlanner() {
           </Text>
           <Select
             label="Sala"
-            data={roomOptions}
+            data={dialogRoomOptionsData.options}
             value={dialogRoom}
             onChange={(value) => {
               setDialogRoom(value)
               setDialogManualAdjust(false)
+              setDialogError(null)
+              setDialogErrorSeverity('warning')
             }}
             placeholder="Selecciona una sala"
             searchable
             nothingFoundMessage="Sin salas"
+            withCheckIcon={false}
+            styles={(theme) => ({
+              input: selectedRoomIsConflicting
+                ? {
+                    borderColor: theme.colors.red[5],
+                    color: theme.colors.red[6],
+                  }
+                : {},
+            })}
+            renderOption={renderRoomOption}
           />
           <Select
             label="Bloque horario"
-            data={timeslotOptions}
+            data={dialogTimeslotOptionsData.options}
             value={dialogTimeslot}
             onChange={(value) => {
               setDialogTimeslot(value)
               setDialogManualAdjust(false)
+              setDialogError(null)
+              setDialogErrorSeverity('warning')
             }}
             placeholder="Selecciona un bloque"
             searchable
             nothingFoundMessage="Sin bloques"
+            withCheckIcon={false}
+            styles={(theme) => ({
+              input: selectedTimeslotIsConflicting
+                ? {
+                    borderColor: theme.colors.red[5],
+                    color: theme.colors.red[6],
+                  }
+                : {},
+            })}
+            renderOption={renderTimeslotOption}
           />
           {dialogAvailability && (
             <Text size="xs" c="dimmed">
@@ -1303,8 +1655,43 @@ export default function SchedulePlanner() {
             }}
           />
           {dialogError && (
-            <Alert color="orange" variant="light" title="Ajusta la asignación">
-              {dialogError}
+            <Alert
+              color={dialogErrorSeverity === 'error' ? 'red' : 'orange'}
+              variant="light"
+              title={dialogErrorSeverity === 'error' ? 'No se pudo guardar el bloque' : 'Ajusta la asignación'}
+            >
+              <Stack gap="xs">
+                <Text size="sm">{dialogError}</Text>
+                {(selectedRoomConflictDetail || selectedTimeslotConflictDetail) && (
+                  <Text
+                    size="xs"
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.4,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {selectedRoomConflictDetail || selectedTimeslotConflictDetail}
+                  </Text>
+                )}
+              </Stack>
+            </Alert>
+          )}
+          {!dialogError && (selectedRoomConflictDetail || selectedTimeslotConflictDetail) && (
+            <Alert
+              color="red"
+              variant="light"
+              title="Conflicto detectado"
+            >
+              <Text
+                size="sm"
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.4,
+                }}
+              >
+                {selectedRoomConflictDetail || selectedTimeslotConflictDetail}
+              </Text>
             </Alert>
           )}
           <Group justify="flex-end" gap="sm">
@@ -1327,22 +1714,65 @@ export default function SchedulePlanner() {
               </Text>
               <Title order={4}>Optimiza automáticamente tu horario</Title>
             </div>
-            <Group gap="sm">
-              <NumberInput
-                label="Bloques consecutivos máx."
-                value={maxConsecutiveBlocks}
-                min={1}
-                max={6}
-                onChange={(value) => setMaxConsecutiveBlocks(Number(value) || 1)}
-                maw={160}
-              />
-              <Switch
-                label="Exigir pausas entre clases del mismo docente"
-                checked={requireBreaks}
-                onChange={(event) => setRequireBreaks(event.currentTarget.checked)}
-              />
-            </Group>
           </Group>
+          
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+            <NumberInput
+              label="Bloques consecutivos máx."
+              description="Máximo de clases seguidas sin descanso"
+              value={maxConsecutiveBlocks}
+              min={1}
+              max={6}
+              onChange={(value) => setMaxConsecutiveBlocks(Number(value) || 1)}
+            />
+            <NumberInput
+              label="Minutos de recreo"
+              description="Tiempo mínimo entre clases"
+              value={minGapMinutes}
+              min={0}
+              max={60}
+              step={5}
+              onChange={(value) => setMinGapMinutes(Number(value) || 0)}
+            />
+            <NumberInput
+              label="Horas máx. por día"
+              description="Límite diario por programa"
+              value={maxDailyHours}
+              min={1}
+              max={12}
+              onChange={(value) => setMaxDailyHours(Number(value) || 6)}
+            />
+          </SimpleGrid>
+
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+            <Switch
+              label="Exigir pausas entre clases del mismo docente"
+              description="Requiere al menos 1 bloque de separación"
+              checked={requireBreaks}
+              onChange={(event) => setRequireBreaks(event.currentTarget.checked)}
+            />
+            <Switch
+              label="Respetar horario de almuerzo (12:00-14:00)"
+              description="No programa clases durante almuerzo Lun-Vie"
+              checked={enableLunchBlocks}
+              onChange={(event) => setEnableLunchBlocks(event.currentTarget.checked)}
+            />
+          </SimpleGrid>
+
+          {enableLunchBlocks && (
+            <NumberInput
+              label="Peso de balanceo (0-1)"
+              description="Mayor valor = mejor distribución en la semana"
+              value={balanceWeight}
+              min={0}
+              max={1}
+              step={0.1}
+              decimalScale={1}
+              onChange={(value) => setBalanceWeight(Number(value) || 0.3)}
+              maw={250}
+            />
+          )}
+
           <Group gap="sm">
             <Button leftSection={<IconRun size={18} />} loading={optimizerLoading} onClick={() => runOptimizer()}>
               Ejecutar optimizador
@@ -1358,6 +1788,59 @@ export default function SchedulePlanner() {
               </Button>
             )}
           </Group>
+
+          {qualityMetrics && (
+            <Card 
+              withBorder 
+              radius="md" 
+              padding="md" 
+              bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'} 
+              style={{ borderColor: theme.colors.teal[colorScheme === 'dark' ? 4 : 3] }}
+            >
+              <Stack gap="sm">
+                <Group justify="space-between">
+                  <Text size="sm" fw={600} c={colorScheme === 'dark' ? 'teal.4' : 'teal.7'}>
+                    Métricas de Calidad del Horario
+                  </Text>
+                  <Badge color="teal" variant="light">
+                    Score: {Math.round(qualityMetrics.balance_score ?? 0)}/100
+                  </Badge>
+                </Group>
+                <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+                  <div>
+                    <Text size="xs" c="dimmed">Asignados</Text>
+                    <Text size="sm" fw={500}>{qualityMetrics.total_assigned ?? 0}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Carga promedio</Text>
+                    <Text size="sm" fw={500}>{qualityMetrics.avg_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Carga máxima</Text>
+                    <Text size="sm" fw={500}>{qualityMetrics.max_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed">Utilización</Text>
+                    <Text size="sm" fw={500}>{qualityMetrics.timeslot_utilization ? (qualityMetrics.timeslot_utilization * 100).toFixed(0) : '0'}%</Text>
+                  </div>
+                </SimpleGrid>
+                {(qualityMetrics.daily_overload_count ?? 0) > 0 && (
+                  <Alert color="yellow" variant="light" p="xs">
+                    <Text size="xs">
+                      ⚠️ {qualityMetrics.daily_overload_count} día(s) exceden el límite de {maxDailyHours}h
+                    </Text>
+                  </Alert>
+                )}
+                {(qualityMetrics.unassigned_count ?? 0) > 0 && (
+                  <Alert color="orange" variant="light" p="xs">
+                    <Text size="xs">
+                      ⚠️ {qualityMetrics.unassigned_count} curso(s) no pudieron asignarse completamente
+                    </Text>
+                  </Alert>
+                )}
+              </Stack>
+            </Card>
+          )}
         </Stack>
       </Card>
 

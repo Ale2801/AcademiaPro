@@ -17,6 +17,8 @@ export type ScheduleEntry = {
   teacher_name?: string | null
   timeslot_id?: number | null
   program_semester_id?: number | null
+  program_id?: number | null
+  program_semester_label?: string | null
 }
 
 const DAY_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']

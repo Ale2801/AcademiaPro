@@ -59,10 +59,24 @@ const baseTimeslot = {
   end_time: '10:00:00',
 }
 
-const scheduleEntriesRef: { current: any[] } = { current: [] }
+const baseCourseLabel = 'Álgebra · 2025-1 · Grupo A'
+const baseProgramLabel = `${baseProgram.name} · ${baseSemester.label}`
+const foreignCourseLabel = 'Macroeconomía · 2025-1 · Grupo B'
+const foreignProgramLabel = 'Derecho · Semestre 3'
+
+const programScheduleRef: { current: any[] } = { current: [] }
+const globalScheduleRef: { current: any[] } = { current: [] }
+
+beforeAll(() => {
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: vi.fn(),
+  })
+})
 
 function setupApiMocks() {
-  scheduleEntriesRef.current = []
+  programScheduleRef.current = []
+  globalScheduleRef.current = []
   designerRef.current = null
   getMock.mockReset()
   postMock.mockReset()
@@ -93,7 +107,10 @@ function setupApiMocks() {
         }
         return Promise.resolve({ data: [] })
       case '/schedule/overview':
-        return Promise.resolve({ data: scheduleEntriesRef.current })
+        if (config?.params?.program_semester_id != null) {
+          return Promise.resolve({ data: programScheduleRef.current })
+        }
+        return Promise.resolve({ data: globalScheduleRef.current })
       case '/enrollments/':
         return Promise.resolve({ data: [] })
       default:
@@ -107,6 +124,7 @@ function setupApiMocks() {
         const entry = {
           id: 901,
           course_id: payload.course_id,
+          course_name: baseCourseLabel,
           room_id: payload.room_id,
           timeslot_id: payload.timeslot_id,
           room_code: baseRoom.code,
@@ -115,8 +133,12 @@ function setupApiMocks() {
           end_time: '10:00',
           duration_minutes: payload.duration_minutes ?? 60,
           start_offset_minutes: payload.start_offset_minutes ?? 0,
+          program_id: baseProgram.id,
+          program_semester_id: baseSemester.id,
+          program_semester_label: baseProgramLabel,
         }
-        scheduleEntriesRef.current = [entry]
+        programScheduleRef.current = [...programScheduleRef.current.filter((item) => item.id !== entry.id), entry]
+        globalScheduleRef.current = [...globalScheduleRef.current.filter((item) => item.id !== entry.id), entry]
         return Promise.resolve({ data: entry })
       }
       case '/schedule/optimize':
@@ -138,14 +160,19 @@ function setupApiMocks() {
         const entries = payload.assignments.map((assignment: any, idx: number) => ({
           id: 1000 + idx,
           ...assignment,
+          course_name: baseCourseLabel,
           room_code: baseRoom.code,
           day_of_week: baseTimeslot.day_of_week,
           start_time: '09:00',
           end_time: '10:00',
           duration_minutes: assignment.duration_minutes ?? 60,
           start_offset_minutes: assignment.start_offset_minutes ?? 0,
+          program_id: baseProgram.id,
+          program_semester_id: baseSemester.id,
+          program_semester_label: baseProgramLabel,
         }))
-        scheduleEntriesRef.current = entries
+        programScheduleRef.current = entries
+        globalScheduleRef.current = entries
         return Promise.resolve({ data: entries })
       }
       case '/schedule/assignments/teacher':
@@ -201,6 +228,145 @@ describe('SchedulePlanner drag & drop experience', () => {
     })
 
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
+  })
+
+  it('resalta opciones conflictivas cuando la sala ya está ocupada', async () => {
+    const occupiedEntry = {
+      id: 777,
+      course_id: baseCourse.id,
+      course_name: baseCourseLabel,
+      room_id: baseRoom.id,
+      timeslot_id: baseTimeslot.id,
+      room_code: baseRoom.code,
+      day_of_week: baseTimeslot.day_of_week,
+      start_time: '09:00',
+      end_time: '10:00',
+      duration_minutes: 60,
+      start_offset_minutes: 0,
+      program_id: baseProgram.id,
+      program_semester_id: baseSemester.id,
+      program_semester_label: baseProgramLabel,
+    }
+    programScheduleRef.current = [occupiedEntry]
+    globalScheduleRef.current = [occupiedEntry]
+
+    renderPlanner()
+
+    await waitFor(() => expect(designerRef.current).toBeTruthy())
+
+    await act(async () => {
+      designerRef.current.onCourseDrop(baseCourse.id, baseTimeslot.id)
+    })
+
+    expect(
+      await screen.findByText('No hay espacio disponible en este bloque para la sala seleccionada.'),
+    ).toBeInTheDocument()
+
+    await screen.findByRole('button', { name: 'Guardar cambios' })
+
+    const roomInput = screen.getByPlaceholderText('Selecciona una sala') as HTMLInputElement
+    await waitFor(() => expect(roomInput).toHaveStyle('color: #fa5252'))
+
+    await waitFor(() => {
+      const alertElement = screen.getByRole('alert')
+      expect(alertElement).toBeInTheDocument()
+      expect(screen.queryAllByText(baseCourseLabel, { exact: false }).length).toBeGreaterThan(0)
+      expect(screen.queryAllByText(baseProgramLabel, { exact: false }).length).toBeGreaterThan(0)
+    })
+
+    fireEvent.mouseDown(roomInput)
+    const roomOptionNodes = await screen.findAllByText('LAB-101 (30 personas)')
+    const roomOption = roomOptionNodes.find((node) => node.closest('[data-combobox-option]'))
+    expect(roomOption).toBeTruthy()
+    expect(roomOption).toHaveStyle({ color: 'rgb(250, 82, 82)' })
+
+    const timeslotInput = screen.getByPlaceholderText('Selecciona un bloque') as HTMLInputElement
+    await waitFor(() => expect(timeslotInput).toHaveStyle('color: #fa5252'))
+
+    fireEvent.mouseDown(timeslotInput)
+    const timeslotOptionNodes = await screen.findAllByText('Miércoles · 09:00-10:00')
+    const timeslotOption = timeslotOptionNodes.find((node) => node.closest('[data-combobox-option]'))
+    expect(timeslotOption).toBeTruthy()
+    expect(timeslotOption).toHaveStyle({ color: 'rgb(250, 82, 82)' })
+  })
+
+  it('detecta conflictos cuando otra carrera ocupa la sala', async () => {
+    const foreignEntry = {
+      id: 888,
+      course_id: baseCourse.id + 1,
+      course_name: foreignCourseLabel,
+      room_id: baseRoom.id,
+      timeslot_id: baseTimeslot.id,
+      room_code: baseRoom.code,
+      day_of_week: baseTimeslot.day_of_week,
+      start_time: '09:00',
+      end_time: '10:00',
+      duration_minutes: 60,
+      start_offset_minutes: 0,
+      program_id: baseProgram.id + 1,
+      program_semester_id: baseSemester.id + 1,
+      program_semester_label: foreignProgramLabel,
+    }
+    programScheduleRef.current = []
+    globalScheduleRef.current = [foreignEntry]
+
+    renderPlanner()
+
+    await waitFor(() => expect(designerRef.current).toBeTruthy())
+
+    await act(async () => {
+      designerRef.current.onCourseDrop(baseCourse.id, baseTimeslot.id)
+    })
+
+    expect(
+      await screen.findByText('No hay espacio disponible en este bloque para la sala seleccionada.'),
+    ).toBeInTheDocument()
+
+    const roomInput = screen.getByPlaceholderText('Selecciona una sala') as HTMLInputElement
+    await waitFor(() => expect(roomInput).toHaveStyle('color: #fa5252'))
+
+    await waitFor(() => {
+      const alertElement = screen.getByRole('alert')
+      expect(alertElement).toBeInTheDocument()
+      expect(screen.queryAllByText(foreignCourseLabel, { exact: false }).length).toBeGreaterThan(0)
+      expect(screen.queryAllByText(foreignProgramLabel, { exact: false }).length).toBeGreaterThan(0)
+    })
+
+    fireEvent.mouseDown(roomInput)
+    const roomOptionNodes = await screen.findAllByText('LAB-101 (30 personas)')
+    const roomOption = roomOptionNodes.find((node) => node.closest('[data-combobox-option]'))
+    expect(roomOption).toBeTruthy()
+    expect(roomOption).toHaveStyle({ color: 'rgb(250, 82, 82)' })
+
+    const timeslotInput = screen.getByPlaceholderText('Selecciona un bloque') as HTMLInputElement
+    await waitFor(() => expect(timeslotInput).toHaveStyle('color: #fa5252'))
+
+    fireEvent.mouseDown(timeslotInput)
+    const timeslotOptionNodes = await screen.findAllByText('Miércoles · 09:00-10:00')
+    const timeslotOption = timeslotOptionNodes.find((node) => node.closest('[data-combobox-option]'))
+    expect(timeslotOption).toBeTruthy()
+    expect(timeslotOption).toHaveStyle({ color: 'rgb(250, 82, 82)' })
+  })
+
+  it('mantiene el modal abierto y muestra el error del backend', async () => {
+    renderPlanner()
+
+    await waitFor(() => expect(designerRef.current).toBeTruthy())
+
+    await act(async () => {
+      designerRef.current.onCourseDrop(baseCourse.id, baseTimeslot.id)
+    })
+
+    postMock.mockRejectedValueOnce({
+      response: { data: { detail: 'Conflicto detectado por el backend' } },
+    })
+
+    const submit = await screen.findByRole('button', { name: 'Guardar cambios' })
+    fireEvent.click(submit)
+
+    expect(await screen.findByText('Conflicto detectado por el backend')).toBeInTheDocument()
+    expect(screen.getByText('No se pudo guardar el bloque')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
   })
 
   it('ejecuta el optimizador y aplica la propuesta resultante', async () => {
@@ -286,5 +452,65 @@ describe('SchedulePlanner drag & drop experience', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Aplicar propuesta' })).not.toBeInTheDocument()
     })
+  })
+
+  it('should handle incomplete quality metrics gracefully', async () => {
+    setupApiMocks()
+
+    postMock.mockImplementation((path: string) => {
+      if (path === '/schedule/optimize') {
+        return Promise.resolve({
+          data: {
+            assignments: [
+              {
+                course_id: baseCourse.id,
+                room_id: baseRoom.id,
+                timeslot_id: baseTimeslot.id,
+                duration_minutes: 60,
+                start_offset_minutes: 0,
+              },
+            ],
+            unassigned: [],
+            // Métricas parciales (simulando backend con error o versión antigua)
+            quality_metrics: {
+              balance_score: 75,
+              total_assigned: 1,
+              // avg_daily_load, max_daily_load, timeslot_utilization undefined
+            },
+          },
+        })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    await act(async () => {
+      render(
+        <MantineProvider>
+          <SchedulePlanner />
+        </MantineProvider>,
+      )
+    })
+
+    await waitFor(() => expect(screen.getByText(baseCourseLabel)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    await waitFor(() => {
+      expect(postMock).toHaveBeenCalledWith('/schedule/optimize', expect.any(Object))
+    })
+
+    // Verificar que muestra el score disponible
+    await waitFor(() => {
+      expect(screen.getByText(/Score: 75\/100/i)).toBeInTheDocument()
+    })
+
+    // Verificar que el panel de métricas se renderiza sin crashear
+    await waitFor(() => {
+      expect(screen.getByText('Métricas de Calidad del Horario')).toBeInTheDocument()
+    })
+
+    // Verificar que muestra valores (aunque sean fallbacks)
+    // El componente no debe crashear con métricas incompletas
+    expect(screen.getByText(/Asignados/i)).toBeInTheDocument()
   })
 })

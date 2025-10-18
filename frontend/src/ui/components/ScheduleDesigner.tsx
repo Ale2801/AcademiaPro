@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Accordion,
   ActionIcon,
   Badge,
   Card,
@@ -349,6 +350,12 @@ export function ScheduleDesigner({
 
   const [filter, setFilter] = useState('')
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null)
+  const dayPanels = useMemo(() => timeslots.map((column) => `day-${column.day}`), [timeslots])
+  const [expandedDays, setExpandedDays] = useState<string[]>([])
+
+  useEffect(() => {
+    setExpandedDays((current) => current.filter((value) => dayPanels.includes(value)))
+  }, [dayPanels])
 
   const filteredCourses = useMemo(() => {
     const term = filter.trim().toLowerCase()
@@ -403,8 +410,11 @@ export function ScheduleDesigner({
     <Card withBorder radius="lg" padding="xl" shadow="sm">
       <Stack gap="xl">
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <Group align="flex-start" gap="xl" wrap="wrap">
-            <Stack gap="md" style={{ flex: 1, minWidth: '280px', maxWidth: '360px' }}>
+          <Group align="stretch" gap="xl" wrap="wrap">
+            <Stack
+              gap="md"
+              style={{ flex: '0 0 340px', minWidth: '280px', maxWidth: '360px', alignSelf: 'stretch' }}
+            >
               <Group justify="space-between" align="center">
                 <div>
                   <Text size="xs" tt="uppercase" fw={600} c="dimmed">
@@ -422,7 +432,7 @@ export function ScheduleDesigner({
                 value={filter}
                 onChange={(event) => setFilter(event.currentTarget.value)}
               />
-              <ScrollArea style={{ maxHeight: '420px' }} offsetScrollbars>
+              <ScrollArea.Autosize mah="60vh" type="always" offsetScrollbars>
                 <Stack gap="md">
                   {filteredCourses.length === 0 ? (
                     <Text size="sm" c="dimmed">
@@ -443,10 +453,15 @@ export function ScheduleDesigner({
                     })
                   )}
                 </Stack>
-              </ScrollArea>
+              </ScrollArea.Autosize>
             </Stack>
 
-            <ScrollArea style={{ flex: 1, minWidth: '360px' }} offsetScrollbars>
+            <ScrollArea.Autosize
+              mah="70vh"
+              style={{ flex: 1, minWidth: '360px' }}
+              type="always"
+              offsetScrollbars
+            >
               <Stack gap="lg">
                 <Group align="center" justify="space-between">
                   <Title order={4}>Horario semanal</Title>
@@ -465,27 +480,44 @@ export function ScheduleDesigner({
                       </Stack>
                     </Card>
                   ) : (
-                    timeslots.map((column) => (
-                      <Stack key={column.day} gap="sm">
-                        <Title order={5}>{column.label}</Title>
-                        <Stack gap="sm">
-                          {column.slots.map((slot) => (
-                            <TimeslotDropZone
-                              key={slot.id}
-                              slot={slot}
-                              assignments={assignmentsByTimeslot.get(slot.id) ?? []}
-                              loading={loading}
-                              onEdit={onEditAssignment}
-                              onDelete={onDeleteAssignment}
-                            />
-                          ))}
-                        </Stack>
-                      </Stack>
-                    ))
+                    <Accordion
+                      multiple
+                      value={expandedDays}
+                      onChange={setExpandedDays}
+                      variant="contained"
+                      radius="lg"
+                    >
+                      {timeslots.map((column) => (
+                        <Accordion.Item value={`day-${column.day}`} key={column.day}>
+                          <Accordion.Control>
+                            <Group justify="space-between" align="center">
+                              <Text fw={600}>{column.label}</Text>
+                              <Badge color="blue" variant="light">
+                                {column.slots.length} bloque{column.slots.length === 1 ? '' : 's'}
+                              </Badge>
+                            </Group>
+                          </Accordion.Control>
+                          <Accordion.Panel>
+                            <Stack gap="sm">
+                              {column.slots.map((slot) => (
+                                <TimeslotDropZone
+                                  key={slot.id}
+                                  slot={slot}
+                                  assignments={assignmentsByTimeslot.get(slot.id) ?? []}
+                                  loading={loading}
+                                  onEdit={onEditAssignment}
+                                  onDelete={onDeleteAssignment}
+                                />
+                              ))}
+                            </Stack>
+                          </Accordion.Panel>
+                        </Accordion.Item>
+                      ))}
+                    </Accordion>
                   )}
                 </Stack>
               </Stack>
-            </ScrollArea>
+            </ScrollArea.Autosize>
           </Group>
           <DragOverlay dropAnimation={null}>{renderOverlay()}</DragOverlay>
         </DndContext>
