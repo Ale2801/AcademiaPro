@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from .db import engine
 from .models import (
     Attendance,
+    AppSetting,
     Course,
     CourseSchedule,
     Enrollment,
@@ -62,6 +63,7 @@ def ensure_demo_data() -> None:
     """Populate the main catalog tables with deterministic demo data for the UI."""
     with Session(engine) as session:
         ensure_default_admin(session)
+        _ensure_app_settings(session)
 
         program_map = _ensure_programs(session)
         semester_map = _ensure_program_semesters(session, program_map)
@@ -76,6 +78,93 @@ def ensure_demo_data() -> None:
         evaluation_map = _ensure_evaluations(session, course_map)
         _ensure_grades(session, enrollment_map, evaluation_map)
         _ensure_attendance(session, enrollment_map)
+
+
+def _ensure_app_settings(session: Session) -> None:
+    defaults = [
+        {
+            "key": "branding.app_name",
+            "value": "AcademiaPro",
+            "label": "Nombre de la plataforma",
+            "description": "Identificador principal mostrado en cabeceras y correos.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "branding.tagline",
+            "value": "Planifica, gestiona y escala tu campus académico.",
+            "label": "Lema institucional",
+            "description": "Texto breve utilizado en la página de inicio y login.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "branding.logo_url",
+            "value": "https://placehold.co/400x120?text=AcademiaPro",
+            "label": "Logo (URL)",
+            "description": "Imagen SVG o PNG utilizada en la barra superior.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "branding.primary_color",
+            "value": "#1e40af",
+            "label": "Color primario",
+            "description": "Color de acento principal para componentes interactivos.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "platform.default_language",
+            "value": "es",
+            "label": "Idioma por defecto",
+            "description": "Código ISO para el idioma predeterminado de la interfaz.",
+            "category": "platform",
+            "is_public": True,
+        },
+        {
+            "key": "platform.timezone",
+            "value": "America/Bogota",
+            "label": "Zona horaria",
+            "description": "Zona horaria principal utilizada para reportes e integraciones.",
+            "category": "platform",
+            "is_public": True,
+        },
+        {
+            "key": "contact.support_email",
+            "value": "soporte@academiapro.dev",
+            "label": "Correo de soporte",
+            "description": "Canal de contacto para incidencias de la intranet.",
+            "category": "contact",
+            "is_public": True,
+        },
+        {
+            "key": "contact.support_phone",
+            "value": "+57 300 000 0000",
+            "label": "Teléfono de soporte",
+            "description": "Línea directa del equipo de soporte académico.",
+            "category": "contact",
+            "is_public": False,
+        },
+    ]
+
+    dirty = False
+    for item in defaults:
+        setting = session.exec(select(AppSetting).where(AppSetting.key == item["key"])).first()
+        if not setting:
+            session.add(AppSetting(**item))
+            dirty = True
+            continue
+        updated = False
+        for field in ("value", "label", "description", "category", "is_public"):
+            if getattr(setting, field) != item[field]:
+                setattr(setting, field, item[field])
+                updated = True
+        if updated:
+            session.add(setting)
+            dirty = True
+    if dirty:
+        session.commit()
 
 
 def _get_or_create_user(

@@ -168,9 +168,6 @@ export function App() {
                     setLoading(true)
                     try {
                       await login(email, password)
-                      // Leer role del token via endpoint opcional o decodificar JWT en frontend si se requiere.
-                      // Simplicidad: consultar al backend el usuario por email si eres admin.
-                      // Mejor: decodificar JWT y redirigir según 'role'.
                       const base64 = (s: string) => decodeURIComponent(atob(s.replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''))
                       // persistimos token para decodificarlo sin depender del header
                       const hdr = api.defaults.headers.common['Authorization']
@@ -282,14 +279,21 @@ export function App() {
                     { label: 'Horario maestro', description: 'Aulas, ocupación y disponibilidad', icon: IconCalendarEvent },
                     { label: 'Evaluaciones y notas', description: 'Rubricas, revisión y cierres', icon: IconCheckbox },
                     { label: 'Configuración', description: 'Roles, integraciones, seguridad', icon: IconSettingsFilled },
-                  ].map((item) => (
-                    <Card
-                      key={item.label}
-                      withBorder
-                      padding="md"
-                      radius="md"
-                      style={{ background: 'rgba(17, 24, 39, 0.7)', color: 'white' }}
-                    >
+                  ].map((item) => {
+                    const isSettingsCard = item.label === 'Configuración'
+                    return (
+                      <Card
+                        key={item.label}
+                        withBorder
+                        padding="md"
+                        radius="md"
+                        style={{
+                          background: 'rgba(17, 24, 39, 0.7)',
+                          color: 'white',
+                          cursor: isSettingsCard ? 'pointer' : undefined,
+                        }}
+                        onClick={isSettingsCard ? () => navigate('/dashboard/admin/settings') : undefined}
+                      >
                       <Group align="flex-start" gap="sm">
                         <ThemeIcon variant="white" size={36} radius="md">
                           <item.icon size={18} />
@@ -301,8 +305,9 @@ export function App() {
                           </Text>
                         </div>
                       </Group>
-                    </Card>
-                  ))}
+                      </Card>
+                    )
+                  })}
                 </Stack>
               </div>
               <Divider

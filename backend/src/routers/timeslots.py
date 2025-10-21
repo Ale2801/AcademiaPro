@@ -55,7 +55,7 @@ def _time_key(day: int, start: dt_time, end: dt_time, campus: str | None, commen
 def bulk_upsert_timeslots(payload: TimeslotBulkRequest, session=Depends(get_session), user=Depends(require_roles("admin"))):
 	try:
 		slots = payload.slots
-	except ValueError as exc:  # Defensive, should be handled by validators
+	except ValueError as exc:  # Validación extra; en teoría Pydantic ya bloquea estos valores
 		raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 	existing = session.exec(select(Timeslot)).all()

@@ -50,6 +50,7 @@ import {
   IconAlertTriangle,
 } from '@tabler/icons-react'
 import { api } from '../lib/api'
+import GlobalScheduleOptimizer from './components/GlobalScheduleOptimizer'
 import SchedulePlanner from './components/SchedulePlanner'
 
 type Field = {
@@ -1371,9 +1372,12 @@ export function Admin() {
   ]), [])
 
   const plannerTabKey = 'planner'
-  const [active, setActive] = useState(crudSections[0].key)
+  const globalPlannerTabKey = 'global-planner'
+  const defaultTab = crudSections[0]?.key ?? plannerTabKey
+  const [active, setActive] = useState(defaultTab)
   const current = crudSections.find((section) => section.key === active)
   const isPlanner = active === plannerTabKey
+  const isGlobalPlanner = active === globalPlannerTabKey
 
   const quickStats = useMemo(() => ([
     { label: 'Catálogos activos', value: crudSections.length, hint: 'Dominios conectados', icon: IconDatabase },
@@ -1414,18 +1418,21 @@ export function Admin() {
         <Tabs value={active} onChange={(value) => value && setActive(value)} variant="pills" radius="md" keepMounted={false}>
           <Tabs.List style={{ flexWrap: 'wrap', gap: 8 }}>
             {crudSections.map((section) => (
-              <Tabs.Tab key={section.key} value={section.key} leftSection={<section.icon size={16} />}> 
+              <Tabs.Tab key={section.key} value={section.key} leftSection={<section.icon size={16} />}>
                 {section.title}
               </Tabs.Tab>
             ))}
             <Tabs.Tab value={plannerTabKey} leftSection={<IconCalendarCog size={16} />}>
-              Planificador de horarios
+              Planificador por programa
+            </Tabs.Tab>
+            <Tabs.Tab value={globalPlannerTabKey} leftSection={<IconCalendarPlus size={16} />}>
+              Optimizador global
             </Tabs.Tab>
           </Tabs.List>
         </Tabs>
       </Card>
 
-  {isPlanner ? <SchedulePlanner /> : current && <CrudSection section={current} />}
+      {isPlanner ? <SchedulePlanner /> : isGlobalPlanner ? <GlobalScheduleOptimizer /> : current && <CrudSection section={current} />}
     </Stack>
   )
 }

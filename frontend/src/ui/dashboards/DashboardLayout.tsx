@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Title, Text, Group, Avatar, Badge, ActionIcon, Tooltip, Modal, Button, Stack, useMantineColorScheme } from '@mantine/core'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import {
   IconChevronLeft,
@@ -21,11 +21,20 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const stored = window.localStorage.getItem('dashboard_nav_collapsed')
+      return stored === '1'
+    } catch {
+      return false
+    }
+  })
   const [dragStartX, setDragStartX] = useState<number | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const navigate = useNavigate()
   const { token: authToken } = useAuth()
+  const location = useLocation()
   const { colorScheme, setColorScheme } = useMantineColorScheme()
   const [storedToken, setStoredToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
@@ -47,12 +56,22 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   }
   const isAuthenticated = Boolean(authToken || storedToken || tokenFromStorage)
   const navItems = useMemo(() => ([
-    { label: 'Inicio', to: '/dashboard/admin', icon: IconLayoutDashboard },
-    { label: 'Cursos', to: '#', icon: IconChalkboard },
-    { label: 'Evaluaciones', to: '#', icon: IconNotebook },
-    { label: 'Horario', to: '#', icon: IconCalendarStats },
-    { label: 'Asistencia', to: '#', icon: IconUserCheck },
-    { label: 'Ajustes', to: '#', icon: IconSettings },
+    {
+      label: 'Inicio',
+      to: '/dashboard/admin',
+      icon: IconLayoutDashboard,
+      matcher: (path: string) => path === '/dashboard/admin',
+    },
+    { label: 'Cursos', to: '/dashboard/admin#cursos', icon: IconChalkboard },
+    { label: 'Evaluaciones', to: '/dashboard/admin#evaluaciones', icon: IconNotebook },
+    { label: 'Horario', to: '/dashboard/admin#horario', icon: IconCalendarStats },
+    { label: 'Asistencia', to: '/dashboard/admin#asistencia', icon: IconUserCheck },
+    {
+      label: 'Ajustes',
+      to: '/dashboard/admin/settings',
+      icon: IconSettings,
+      matcher: (path: string) => path.startsWith('/dashboard/admin/settings'),
+    },
   ]), [])
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -88,6 +107,15 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
     setIsDragging(false)
     setDragStartX(null)
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem('dashboard_nav_collapsed', collapsed ? '1' : '0')
+    } catch {
+      /* ignore persistence errors */
+    }
+  }, [collapsed])
 
   const sidebarBg = colorScheme === 'dark'
     ? (isDragging 
@@ -152,23 +180,25 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
           <nav style={{ display: 'grid', gap: collapsed ? 12 : 8, justifyItems: collapsed ? 'center' : 'stretch' }}>
             {navItems.map((item) => {
               const IconComponent = item.icon
-              const isActive = item.to === '/dashboard/admin'
+              const isActive = item.matcher
+                ? item.matcher(location.pathname)
+                : (item.to !== '#' && location.pathname === item.to)
               return collapsed ? (
                 <Tooltip key={item.label} label={item.label} position="right" withinPortal>
                   <ActionIcon
                     component={Link}
                     to={item.to}
-                    variant={isActive ? 'filled' : 'subtle'}
-                    color={isActive ? 'indigo' : 'gray'}
+                    variant="subtle"
+                    color="gray"
                     radius="md"
                     size="lg"
                     aria-label={item.label}
                     style={{
                       width: 44,
                       height: 44,
-                      border: isActive 
-                        ? '1px solid rgba(99,102,241,0.45)' 
-                        : (colorScheme === 'dark' ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(100,116,139,0.2)'),
+                      border: colorScheme === 'dark'
+                        ? '1px solid rgba(255,255,255,0.12)'
+                        : '1px solid rgba(100,116,139,0.2)',
                       color: sidebarTextColor
                     }}
                   >
@@ -184,11 +214,9 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
                     textDecoration: 'none',
                     padding: '10px 12px',
                     borderRadius: 10,
-                    background: isActive 
-                      ? (colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(99,102,241,0.08)') 
-                      : 'transparent',
-                    transition: 'background 180ms ease',
-                    fontWeight: 500,
+                    background: 'transparent',
+                    transition: 'color 180ms ease',
+                    fontWeight: isActive ? 600 : 500,
                   }}
                 >
                   {item.label}

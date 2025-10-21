@@ -27,7 +27,7 @@ class RoomInput:
 class TimeslotInput:
     timeslot_id: int
     day: int
-    block: int  # discrete block index in day
+    block: int  # índice discreto del bloque dentro del día
     start_minutes: int
     duration_minutes: int
 
@@ -35,7 +35,7 @@ class TimeslotInput:
 @dataclass
 class JornadaConfig:
     """Configuración de horarios por jornada académica"""
-    jornada_id: str  # 'morning', 'afternoon', 'evening'
+    jornada_id: str  # identificador de jornada (p. ej. 'morning', 'afternoon', 'evening')
     start_time_minutes: int  # minutos desde medianoche (ej: 480 = 8:00)
     end_time_minutes: int
     lunch_start_minutes: Optional[int] = None
@@ -50,26 +50,27 @@ class ScheduleQualityMetrics:
     lunch_violations: int = 0
     consecutive_blocks_violations: int = 0
     gap_violations: int = 0
-    balance_score: float = 0.0  # 0-100, más alto = mejor distribución
+    balance_score: float = 0.0  # rango 0-100; valores altos indican mejor distribución
     daily_overload_count: int = 0
-    avg_daily_load: float = 0.0  # Promedio de horas por día
-    max_daily_load: float = 0.0  # Máximo de horas en un día
-    timeslot_utilization: float = 0.0  # % de timeslots utilizados (0-1)
-    unassigned_count: int = 0  # Número de cursos no asignados completamente
+    avg_daily_load: float = 0.0  # promedio de horas dictadas por día
+    max_daily_load: float = 0.0  # máxima carga diaria observada
+    timeslot_utilization: float = 0.0  # porcentaje de timeslots utilizados (0-1)
+    unassigned_count: int = 0  # número de cursos que quedaron parcialmente sin asignar
 
 
 @dataclass
 class Constraints:
-    teacher_availability: Dict[int, List[int]]  # teacher_id -> allowed timeslot_ids
-    room_allowed: Optional[Dict[int, List[int]]] = None  # room_id -> allowed timeslot_ids
-    max_consecutive_blocks: int = 4  # Máximo bloques seguidos (era 3, ahora 4 es más realista)
-    min_gap_blocks: int = 0  # Mínimo bloques de gap entre clases del mismo profesor
-    min_gap_minutes: int = 15  # Mínimo minutos entre clases diferentes (recreo)
-    teacher_conflicts: Optional[Dict[int, List[int]]] = None  # teacher_id -> occupied timeslot_ids
-    lunch_blocks: Optional[Set[Tuple[int, int]]] = None  # (day, hour) bloques de almuerzo
+    teacher_availability: Dict[int, List[int]]  # docente_id -> ids de timeslot permitidos
+    room_allowed: Optional[Dict[int, List[int]]] = None  # sala_id -> ids de timeslot permitidos
+    max_consecutive_blocks: int = 4  # máximo de bloques consecutivos antes de exigir descanso
+    min_gap_blocks: int = 0  # cantidad mínima de bloques libres entre clases del mismo docente
+    min_gap_minutes: int = 15  # minutos mínimos entre clases distintas (recreo general)
+    reserve_break_minutes: int = 0  # minutos a reservar dentro del bloque para descanso interno
+    teacher_conflicts: Optional[Dict[int, List[int]]] = None  # docente_id -> ids de timeslot ocupados
+    lunch_blocks: Optional[Set[Tuple[int, int]]] = None  # pares (día, hora) que representan almuerzo
     jornadas: List[JornadaConfig] = field(default_factory=list)
-    max_daily_hours_per_program: int = 6  # Máximo horas por día por programa
-    balance_weight: float = 0.3  # Peso para distribución balanceada (0-1)
+    max_daily_hours_per_program: int = 6  # máximo de horas por día permitidas por programa
+    balance_weight: float = 0.3  # peso asignado a la métrica de balance (0-1)
 
 
 @dataclass
@@ -84,7 +85,7 @@ class AssignmentResult:
 @dataclass
 class SolveResult:
     assignments: List[AssignmentResult]
-    unassigned: Dict[int, int]  # course_id -> remaining minutes
+    unassigned: Dict[int, int]  # course_id -> minutos pendientes por asignar
     quality_metrics: ScheduleQualityMetrics = field(default_factory=ScheduleQualityMetrics)
 
 
@@ -95,6 +96,26 @@ def solve_schedule(
     cons: Constraints,
 ) -> SolveResult:
     return _solve_partial_greedy(courses, rooms, timeslots, cons)
+
+
+def _build_slot_units(slot: TimeslotInput, break_minutes: int) -> List[Tuple[int, bool]]:
+    """Crea la lista de unidades (granularidad de 15 min) marcando cuáles se reservan como descanso."""
+    total_units = max(slot.duration_minutes // GRANULARITY_MINUTES, 0)
+    if total_units <= 0:
+        return []
+
+    if break_minutes <= 0:
+        return [(index, False) for index in range(total_units)]
+
+    reserve_units = ceil(break_minutes / GRANULARITY_MINUTES)
+    if reserve_units >= total_units:
+        reserve_units = total_units - 1 if total_units > 0 else 0
+
+    threshold = total_units - reserve_units if reserve_units > 0 else total_units
+    units: List[Tuple[int, bool]] = []
+    for index in range(total_units):
+        units.append((index, index >= threshold))
+    return units
 
 
 def _solve_partial_greedy(
@@ -126,12 +147,14 @@ def _solve_partial_greedy(
     if not valid_timeslots:
         return SolveResult([], {})
 
-    total_units_by_slot: Dict[int, int] = {}
+    effective_break_minutes = max(cons.min_gap_minutes, cons.reserve_break_minutes)
+
+    slot_unit_templates: Dict[int, List[Tuple[int, bool]]] = {}
     for slot in valid_timeslots:
-        units = max(slot.duration_minutes // GRANULARITY_MINUTES, 0)
-        if units > 0:
-            total_units_by_slot[slot.timeslot_id] = units
-    if not total_units_by_slot:
+        units = _build_slot_units(slot, effective_break_minutes)
+        if units:
+            slot_unit_templates[slot.timeslot_id] = units
+    if not slot_unit_templates:
         return SolveResult([], {})
 
     required_units: Dict[int, int] = {}
@@ -174,10 +197,12 @@ def _solve_partial_greedy(
     assigned_units_per_course: Dict[int, int] = defaultdict(int)
     teacher_busy_slot: Dict[tuple[int, int], int] = {}
     teacher_day_blocks: Dict[int, Dict[int, Set[int]]] = defaultdict(lambda: defaultdict(set))
+    teacher_day_last_block: Dict[Tuple[int, int], Optional[int]] = {}
+    teacher_day_streak: Dict[Tuple[int, int], int] = {}
     
     # Rastreo de carga por programa y día para balancear
     program_daily_minutes: Dict[Tuple[Optional[int], int], int] = defaultdict(int)
-    course_day_assignments: Dict[Tuple[int, int], int] = defaultdict(int)  # (course_id, day) -> minutes
+    course_day_assignments: Dict[Tuple[int, int], int] = defaultdict(int)  # (course_id, day) -> minutos
     
     # Rastreo de timeslots ocupados por programa/semestre (evitar conflictos de estudiantes)
     program_busy_slots: Dict[Tuple[Optional[int], int], Set[int]] = defaultdict(set)  # (program_semester_id, timeslot_id) -> cursos
@@ -191,45 +216,47 @@ def _solve_partial_greedy(
     else:
         slots_order = valid_timeslots
 
-    for slot in slots_order:
-        total_units = total_units_by_slot.get(slot.timeslot_id, 0)
-        if total_units <= 0:
-            continue
+    course_room_lock: Dict[int, int] = {}
 
-        per_room_units: Dict[int, List[int]] = {}
+    def process_slot(slot: TimeslotInput) -> None:
+        units_template = slot_unit_templates.get(slot.timeslot_id)
+        if not units_template:
+            return
+
+        per_room_units: Dict[int, List[Tuple[int, bool]]] = {}
         for room in rooms_order:
             if cons.room_allowed and room.room_id in room_allowed_map:
                 if slot.timeslot_id not in room_allowed_map[room.room_id]:
                     continue
-            per_room_units[room.room_id] = list(range(total_units))
+            per_room_units[room.room_id] = [unit for unit in units_template]
         if not per_room_units:
-            continue
+            return
+
+        teacher_slot_context: Dict[Tuple[int, int], Tuple[bool, int, Optional[int]]] = {}
+        teacher_slot_processed: Set[Tuple[int, int]] = set()
 
         eligible_courses = [
             course_id
             for course_id, remaining in remaining_units.items()
-            if remaining > 0 
+            if remaining > 0
             and slot.timeslot_id in allowed_slots_map.get(course_id, set())
             and _check_program_daily_limit(
-                course_id, slot, course_lookup, program_daily_minutes, 
-                total_units, cons
+                course_id,
+                slot,
+                course_lookup,
+                program_daily_minutes,
+                len(units_template),
+                cons,
             )
         ]
         if not eligible_courses:
-            continue
+            return
 
         remaining_units_slot = sum(len(indices) for indices in per_room_units.values())
         active_courses = eligible_courses[:]
-        course_room_lock: Dict[int, int] = {}
 
-        while (
-            remaining_units_slot > 0
-            and active_courses
-            and any(per_room_units.values())
-        ):
+        while remaining_units_slot > 0 and active_courses and any(per_room_units.values()):
             cycle_success = False
-            if not active_courses:
-                break
             quota = max(1, ceil(remaining_units_slot / len(active_courses)))
             next_active: List[int] = []
 
@@ -249,18 +276,43 @@ def _solve_partial_greedy(
                     teacher_conflicts_map,
                 ):
                     continue
-                
-                # Verificar que no hay conflicto con otros cursos del mismo programa en este timeslot
+
                 course = course_lookup.get(course_id)
                 if course and course.program_semester_id is not None:
-                    # Si ya hay algún curso de este programa en este timeslot, hay conflicto
-                    if (course.program_semester_id, slot.timeslot_id) in program_busy_slots:
-                        # Ya hay otro curso de este programa en este timeslot - conflicto de estudiantes
+                    key = (course.program_semester_id, slot.timeslot_id)
+                    occupied = program_busy_slots.get(key)
+                    if occupied and course_id not in occupied:
                         continue
+
+                teacher_id = None
+                rest_required = False
+                consecutive_before = 0
+                last_block_value: Optional[int] = None
+                if course:
+                    teacher_id = course.teacher_id
+                    if teacher_id is not None and cons.max_consecutive_blocks > 0:
+                        slot_key = (teacher_id, slot.timeslot_id)
+                        context = teacher_slot_context.get(slot_key)
+                        if context is None:
+                            streak_key = (teacher_id, slot.day)
+                            last_block_value = teacher_day_last_block.get(streak_key)
+                            consecutive_before = teacher_day_streak.get(streak_key, 0)
+                            if last_block_value is None or slot.block != (last_block_value + 1):
+                                consecutive_before = 0
+                            rest_required = (
+                                last_block_value is not None
+                                and slot.block == last_block_value + 1
+                                and consecutive_before >= cons.max_consecutive_blocks
+                            )
+                            teacher_slot_context[slot_key] = (rest_required, consecutive_before, last_block_value)
+                        else:
+                            rest_required, consecutive_before, last_block_value = context
 
                 chunk_target = min(remaining, quota, remaining_units_slot)
                 if chunk_target <= 0:
                     continue
+
+                allow_reserve = not rest_required
 
                 assigned_chunk = _assign_chunk_to_course(
                     course_id,
@@ -270,6 +322,7 @@ def _solve_partial_greedy(
                     slot,
                     assignments_units,
                     course_room_lock,
+                    allow_reserve,
                 )
                 if assigned_chunk == 0:
                     continue
@@ -283,17 +336,36 @@ def _solve_partial_greedy(
                 if teacher_id is not None:
                     teacher_busy_slot[(teacher_id, slot.timeslot_id)] = course_id
                     teacher_day_blocks[teacher_id][slot.day].add(slot.block)
-                
-                # Actualizar carga por programa/día
-                course = course_lookup[course_id]
-                if course.program_semester_id is not None:
+
+                if course and course.program_semester_id is not None:
                     minutes_assigned = assigned_chunk * GRANULARITY_MINUTES
                     program_daily_minutes[(course.program_semester_id, slot.day)] += minutes_assigned
                     course_day_assignments[(course_id, slot.day)] += minutes_assigned
-                    # Marcar este timeslot como ocupado para este programa (evitar conflictos de estudiantes)
                     program_busy_slots[(course.program_semester_id, slot.timeslot_id)].add(course_id)
 
-                if remaining_units[course_id] > 0 and remaining_units_slot > 0:
+                if teacher_id is not None:
+                    slot_key = (teacher_id, slot.timeslot_id)
+                    if slot_key not in teacher_slot_processed:
+                        context = teacher_slot_context.get(slot_key)
+                        if context:
+                            rest_flag, previous_streak, last_block_value = context
+                        else:
+                            rest_flag = False
+                            previous_streak = 0
+                            last_block_value = None
+                        streak_key = (teacher_id, slot.day)
+                        if last_block_value is not None and slot.block == last_block_value + 1:
+                            if rest_flag:
+                                new_streak = 1
+                            else:
+                                new_streak = previous_streak + 1 if previous_streak > 0 else 1
+                        else:
+                            new_streak = 1
+                        teacher_day_streak[streak_key] = new_streak
+                        teacher_day_last_block[streak_key] = slot.block
+                        teacher_slot_processed.add(slot_key)
+
+                if remaining_units.get(course_id, 0) > 0 and remaining_units_slot > 0:
                     next_active.append(course_id)
 
             if not cycle_success:
@@ -316,6 +388,9 @@ def _solve_partial_greedy(
                         teacher_conflicts_map,
                     )
                 ]
+
+    for slot in slots_order:
+        process_slot(slot)
 
     assignments: List[AssignmentResult] = []
     for (course_id, room_id, timeslot_id), units in assignments_units.items():
@@ -431,20 +506,26 @@ def _teacher_can_take_slot(
 def _assign_chunk_to_course(
     course_id: int,
     chunk_target: int,
-    per_room_units: Dict[int, List[int]],
+    per_room_units: Dict[int, List[Tuple[int, bool]]],
     rooms_order: List[RoomInput],
     slot: TimeslotInput,
     assignments_units: Dict[tuple[int, int, int], List[int]],
     course_room_lock: Dict[int, int],
+    allow_reserve: bool,
 ) -> int:
     lock_room_id = course_room_lock.get(course_id)
     assigned = 0
 
-    def _consume(room_id: int, available_units: List[int], amount: int) -> int:
+    def _consume(room_id: int, available_units: List[Tuple[int, bool]], amount: int) -> int:
         taken = 0
-        for _ in range(amount):
-            unit_index = available_units.pop(0)
+        idx = 0
+        while idx < len(available_units) and taken < amount:
+            unit_index, is_reserve = available_units[idx]
+            if not allow_reserve and is_reserve:
+                idx += 1
+                continue
             assignments_units[(course_id, room_id, slot.timeslot_id)].append(unit_index)
+            del available_units[idx]
             taken += 1
         return taken
 
@@ -452,25 +533,22 @@ def _assign_chunk_to_course(
         available = per_room_units.get(lock_room_id)
         if not available:
             return 0
-        to_take = min(chunk_target, len(available))
-        if to_take <= 0:
+        if chunk_target <= 0:
             return 0
-        assigned = _consume(lock_room_id, available, to_take)
+        assigned = _consume(lock_room_id, available, chunk_target)
         return assigned
 
     for room in rooms_order:
         available = per_room_units.get(room.room_id)
         if not available:
             continue
-        to_take = min(chunk_target, len(available))
-        if to_take <= 0:
+        if chunk_target <= 0:
             continue
-        assigned = _consume(room.room_id, available, to_take)
+        assigned = _consume(room.room_id, available, chunk_target)
         if assigned > 0:
             course_room_lock[course_id] = room.room_id
         return assigned
 
-    return 0
     return 0
 
 

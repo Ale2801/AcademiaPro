@@ -475,7 +475,7 @@ describe('SchedulePlanner drag & drop experience', () => {
             quality_metrics: {
               balance_score: 75,
               total_assigned: 1,
-              // avg_daily_load, max_daily_load, timeslot_utilization undefined
+              // avg_daily_load, max_daily_load y timeslot_utilization llegan como undefined
             },
           },
         })

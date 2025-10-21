@@ -62,7 +62,7 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     full_name: str
     hashed_password: str
-    role: str = Field(index=True)  # admin, teacher, student
+    role: str = Field(index=True)  # valores permitidos: admin, teacher, student
     is_active: bool = Field(default=True)
     # Datos personales y de contacto
     phone: Optional[str] = None
@@ -148,7 +148,7 @@ class Subject(SQLModel, table=True):
     credits: int
     description: Optional[str] = None
     department: Optional[str] = None
-    level: Optional[str] = None  # basic/intermediate/advanced u otro criterio
+    level: Optional[str] = None  # niveles como básico/intermedio/avanzado u otro criterio
     program_id: Optional[int] = Field(default=None, foreign_key="program.id")
     hours_per_week: Optional[int] = None
 
@@ -158,8 +158,8 @@ class Course(SQLModel, table=True):
     subject_id: int = Field(foreign_key="subject.id")
     teacher_id: int = Field(foreign_key="teacher.id")
     program_semester_id: int = Field(foreign_key="programsemester.id", index=True)
-    term: str = Field(index=True)  # e.g., 2025-2
-    group: str = Field(default="A")  # section/group
+    term: str = Field(index=True)  # por ejemplo 2025-2
+    group: str = Field(default="A")  # sección o grupo
     weekly_hours: int = Field(default=3)
     capacity: Optional[int] = None
     language: Optional[str] = None
@@ -185,7 +185,7 @@ class Evaluation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     course_id: int = Field(foreign_key="course.id")
     name: str
-    weight: float  # 0-1
+    weight: float  # rango 0-1
     scheduled_at: Optional[datetime] = Field(default=None)
     max_score: float = Field(default=100)
     due_date: Optional[datetime] = None
@@ -212,7 +212,7 @@ class Attendance(SQLModel, table=True):
 
 class Timeslot(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    day_of_week: int  # 0=Mon
+    day_of_week: int  # 0=Lunes
     start_time: time
     end_time: time
     campus: Optional[str] = None
@@ -227,3 +227,13 @@ class CourseSchedule(SQLModel, table=True):
     program_semester_id: int = Field(foreign_key="programsemester.id", index=True)
     duration_minutes: Optional[int] = Field(default=None, description="Minutos asignados dentro del bloque", sa_column_kwargs={"nullable": True})
     start_offset_minutes: Optional[int] = Field(default=None, description="Minutos desde el inicio del bloque", sa_column_kwargs={"nullable": True})
+
+
+class AppSetting(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(index=True, unique=True)
+    value: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    label: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    description: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    category: Optional[str] = Field(default=None, index=True, sa_column_kwargs={"nullable": True})
+    is_public: bool = Field(default=False)

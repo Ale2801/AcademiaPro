@@ -284,6 +284,90 @@ def test_scheduler_respects_min_gap(client: TestClient, admin_token: str):
     assert slot_three["id"] in assigned_ids
 
 
+def test_scheduler_enforces_rest_after_consecutive_blocks(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    course = entities["course"]
+    room = entities["room"]
+
+    slot_windows = [
+        ("08:00", "09:00"),
+        ("09:00", "10:00"),
+        ("10:00", "11:00"),
+        ("11:00", "12:00"),
+        ("12:00", "13:00"),
+        ("13:00", "14:00"),
+    ]
+    slots = [
+        _ensure_timeslot_at(
+            client,
+            headers,
+            day_of_week=1,
+            start_time=start,
+            end_time=end,
+        )
+        for start, end in slot_windows
+    ]
+
+    courses = [
+        {
+            "course_id": course["id"],
+            "teacher_id": course["teacher_id"],
+            "weekly_hours": 5,
+        }
+    ]
+    rooms = [
+        {
+            "room_id": room["id"],
+            "capacity": room.get("capacity", 30),
+        }
+    ]
+    timeslots = [
+        {
+            "timeslot_id": slot["id"],
+            "day": slot["day_of_week"],
+            "block": index,
+        }
+        for index, slot in enumerate(slots, start=1)
+    ]
+    constraints = {
+        "teacher_availability": {
+            course["teacher_id"]: [slot["id"] for slot in slots]
+        },
+        "max_consecutive_blocks": 2,
+        "reserve_break_minutes": 15,
+        "min_gap_blocks": 0,
+        "min_gap_minutes": 15,
+    }
+
+    response = client.post(
+        "/schedule/optimize",
+        json={
+            "courses": courses,
+            "rooms": rooms,
+            "timeslots": timeslots,
+            "constraints": constraints,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+    assignments = [item for item in data["assignments"] if item["course_id"] == course["id"]]
+
+    duration_by_slot = {item["timeslot_id"]: item["duration_minutes"] for item in assignments}
+    third_slot_id = slots[2]["id"]
+    fifth_slot_id = slots[4]["id"]
+    assert third_slot_id in duration_by_slot
+    assert fifth_slot_id in duration_by_slot
+    assert duration_by_slot[third_slot_id] == 45
+    assert duration_by_slot[fifth_slot_id] == 45
+
+    total_assigned = sum(item["duration_minutes"] for item in assignments)
+    assert total_assigned == 300
+    assert not data["unassigned"], data["unassigned"]
+
+
 def test_optimizer_does_not_split_course_across_rooms(client: TestClient, admin_token: str):
     headers = _auth_headers(admin_token)
     entities = _ensure_schedule_entities(client, headers)
@@ -335,6 +419,123 @@ def test_optimizer_does_not_split_course_across_rooms(client: TestClient, admin_
         remaining = next((item for item in data["unassigned"] if item["course_id"] == course["id"]), None)
         assert remaining is not None
         assert remaining["remaining_minutes"] == 120
+
+
+def test_save_assignments_persists_schedule(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    subject = entities["subject"]
+    teacher = entities["teacher"]
+    semester = entities["semester"]
+    room = entities["room"]
+
+    extra_course_resp = client.post(
+        "/courses/",
+        json={
+            "subject_id": subject["id"],
+            "teacher_id": teacher["id"],
+            "term": "2025-1",
+            "group": "AP-1",
+            "weekly_hours": 2,
+            "program_semester_id": semester["id"],
+        },
+        headers=headers,
+    )
+    assert extra_course_resp.status_code == 200, extra_course_resp.text
+    extra_course = extra_course_resp.json()
+
+    target_slot = _ensure_timeslot_at(client, headers, day_of_week=3, start_time="12:00", end_time="13:30")
+
+    payload = {
+        "assignments": [
+            {
+                "course_id": extra_course["id"],
+                "room_id": room["id"],
+                "timeslot_id": target_slot["id"],
+                "duration_minutes": 90,
+                "start_offset_minutes": 0,
+            }
+        ],
+        "replace_existing": True,
+    }
+
+    resp = client.post("/schedule/assignments/save", json=payload, headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    saved = next((item for item in data if item["course_id"] == extra_course["id"]), None)
+    assert saved is not None
+    assert saved["room_id"] == room["id"]
+    assert saved["timeslot_id"] == target_slot["id"]
+    assert saved["program_semester_id"] == semester["id"]
+    assert saved["duration_minutes"] == 90
+    assert saved["start_time"] == "12:00"
+    assert saved["end_time"] in {"13:30", "13:30:00"}
+
+
+def test_save_assignments_rejects_overlaps(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    subject = entities["subject"]
+    teacher = entities["teacher"]
+    semester = entities["semester"]
+    room = entities["room"]
+
+    course_one_resp = client.post(
+        "/courses/",
+        json={
+            "subject_id": subject["id"],
+            "teacher_id": teacher["id"],
+            "term": "2025-1",
+            "group": "AP-2",
+            "weekly_hours": 2,
+            "program_semester_id": semester["id"],
+        },
+        headers=headers,
+    )
+    assert course_one_resp.status_code == 200, course_one_resp.text
+    course_one = course_one_resp.json()
+
+    course_two_resp = client.post(
+        "/courses/",
+        json={
+            "subject_id": subject["id"],
+            "teacher_id": teacher["id"],
+            "term": "2025-1",
+            "group": "AP-3",
+            "weekly_hours": 2,
+            "program_semester_id": semester["id"],
+        },
+        headers=headers,
+    )
+    assert course_two_resp.status_code == 200, course_two_resp.text
+    course_two = course_two_resp.json()
+
+    overlap_slot = _ensure_timeslot_at(client, headers, day_of_week=4, start_time="08:00", end_time="10:00")
+
+    payload = {
+        "assignments": [
+            {
+                "course_id": course_one["id"],
+                "room_id": room["id"],
+                "timeslot_id": overlap_slot["id"],
+                "duration_minutes": 90,
+                "start_offset_minutes": 0,
+            },
+            {
+                "course_id": course_two["id"],
+                "room_id": room["id"],
+                "timeslot_id": overlap_slot["id"],
+                "duration_minutes": 60,
+                "start_offset_minutes": 45,
+            },
+        ],
+        "replace_existing": True,
+    }
+
+    resp = client.post("/schedule/assignments/save", json=payload, headers=headers)
+    assert resp.status_code == 400, resp.text
+    detail = resp.json().get("detail", "")
+    assert "bloque" in detail.lower()
 
 
 def test_optimizer_blocks_teacher_conflict_from_existing_assignments(client: TestClient, admin_token: str):

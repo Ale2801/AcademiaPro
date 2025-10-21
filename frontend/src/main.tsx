@@ -8,6 +8,7 @@ import './styles/landing.css'
 import Landing from './ui/Landing'
 import { App } from './ui/App'
 import AdminDashboard from './ui/dashboards/AdminDashboard'
+import AdminSettingsDashboard from './ui/dashboards/AdminSettingsDashboard'
 import TeacherDashboard from './ui/dashboards/TeacherDashboard'
 import StudentDashboard from './ui/dashboards/StudentDashboard'
 
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
 	{ path: '/', element: <Landing /> },
 	{ path: '/app', element: <App /> },
 	{ path: '/dashboard/admin', element: <AdminDashboard /> },
+	{ path: '/dashboard/admin/settings', element: <AdminSettingsDashboard /> },
 	{ path: '/dashboard/teacher', element: <TeacherDashboard /> },
 	{ path: '/dashboard/student', element: <StudentDashboard /> },
 ])

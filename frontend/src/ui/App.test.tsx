@@ -51,7 +51,7 @@ describe('App', () => {
   renderWithRouter(<App />)
   fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
     // Redirige a /dashboard/admin
-  await screen.findByText(/Panel de Administrador/i)
+  await waitFor(() => expect(screen.getByText(/Panel de Administrador/i)).toBeInTheDocument())
     expect(api.post).toHaveBeenCalledWith('/auth/token', expect.any(URLSearchParams), expect.any(Object))
   })
 })

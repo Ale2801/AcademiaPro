@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-// Polyfill matchMedia for Mantine color scheme hooks in jsdom
+// Polyfill de matchMedia para que Mantine detecte el esquema de color en jsdom
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string) => ({

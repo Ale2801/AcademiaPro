@@ -13,9 +13,9 @@ class ResizeObserverMock {
 }
 
 if (typeof window !== 'undefined') {
-	// @ts-ignore allow override in tests
+	// @ts-ignore: permitimos sobrescribir la implementación en pruebas
 	window.ResizeObserver = window.ResizeObserver || ResizeObserverMock
 }
 
-// @ts-ignore allow override in tests
+// @ts-ignore: permitimos sobrescribir la implementación en pruebas
 global.ResizeObserver = global.ResizeObserver || ResizeObserverMock

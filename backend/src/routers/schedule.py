@@ -51,6 +51,7 @@ class ConstraintsIn(BaseModel):
     max_consecutive_blocks: int = 4  # Aumentado de 3 a 4 para ser más realista
     min_gap_blocks: int = 0
     min_gap_minutes: int = 15  # Recreos entre clases
+    reserve_break_minutes: int = 0  # Minutos a reservar dentro del bloque
     teacher_conflicts: Optional[Dict[int, List[int]]] = None
     lunch_blocks: Optional[List[tuple[int, int]]] = None  # [(day, hour), ...]
     max_daily_hours_per_program: int = 6  # Máximo horas por día por programa
@@ -585,7 +586,7 @@ def my_schedule(session=Depends(get_session), user=Depends(get_current_user)):
         entries = _fetch_entries(session, course_ids)
         return _build_schedule(entries, context, include_students=False)
 
-    # Admin or other roles see everything
+    # Los administradores u otros roles con permiso ven la malla completa
     entries = _fetch_entries(session)
     return _build_schedule(entries, context, include_students=True)
 
