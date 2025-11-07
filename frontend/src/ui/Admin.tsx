@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -12,6 +13,7 @@ import {
   CloseButton,
   Checkbox,
   Divider,
+  Drawer,
   Group,
   Loader,
   NumberInput,
@@ -38,6 +40,7 @@ import {
   IconCalendarCog,
   IconFilter,
   IconClipboardList,
+  IconEye,
   IconArrowsSort,
   IconSearch,
   IconDatabase,
@@ -689,6 +692,19 @@ function CrudSection({ section }: { section: Section }) {
   const [filterQuery, setFilterQuery] = useState('')
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [programSemesters, setProgramSemesters] = useState<any[]>([])
+  const [courses, setCourses] = useState<any[]>([])
+  const [subjects, setSubjects] = useState<any[]>([])
+  const [selectedProgram, setSelectedProgram] = useState<any | null>(null)
+  const [showProgramDetail, setShowProgramDetail] = useState(false)
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const columns = useMemo(() => {
     if (items.length === 0) return []
@@ -725,20 +741,68 @@ function CrudSection({ section }: { section: Section }) {
     defaultValues: {},
   })
 
+  const loadProgramCatalogs = useCallback(async () => {
+    if (section.key !== 'programs') {
+      if (!isMountedRef.current) return
+      setProgramSemesters([])
+      setCourses([])
+      setSubjects([])
+      return
+    }
+    try {
+      const [semestersRes, coursesRes, subjectsRes] = await Promise.all([
+        api.get('/program-semesters/'),
+        api.get('/courses/'),
+        api.get('/subjects/'),
+      ])
+      if (!isMountedRef.current) return
+      setProgramSemesters(Array.isArray(semestersRes.data) ? semestersRes.data : [])
+      setCourses(Array.isArray(coursesRes.data) ? coursesRes.data : [])
+      setSubjects(Array.isArray(subjectsRes.data) ? subjectsRes.data : [])
+    } catch (err) {
+      console.error('No se pudo cargar semestres de programa', err)
+      if (!isMountedRef.current) return
+      setProgramSemesters([])
+      setCourses([])
+      setSubjects([])
+    }
+  }, [section.key])
+
   const load = useCallback(async () => {
+    if (!isMountedRef.current) return
     setLoading(true)
     setError(undefined)
     try {
       const endpoint = section.endpoint.endsWith('/') ? section.endpoint : `${section.endpoint}/`
       const { data } = await api.get(endpoint)
-      setItems(Array.isArray(data) ? data : [])
+      const rows = Array.isArray(data) ? data : []
+      if (!isMountedRef.current) return
+      setItems(rows)
+      if (section.key === 'programs') {
+        await loadProgramCatalogs()
+        if (!isMountedRef.current) return
+        let removedProgram = false
+  setSelectedProgram((prev: any | null) => {
+          if (!prev) return prev
+          const match = rows.find((row) => row.id === prev.id)
+          if (!match) {
+            removedProgram = true
+            return null
+          }
+          return match
+        })
+        if (!isMountedRef.current) return
+        if (removedProgram) {
+          setShowProgramDetail(false)
+        }
+      }
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'Error al cargar'
-      setError(detail)
+      if (isMountedRef.current) setError(detail)
     } finally {
-      setLoading(false)
+      if (isMountedRef.current) setLoading(false)
     }
-  }, [section.endpoint])
+  }, [loadProgramCatalogs, section.endpoint, section.key])
 
   useEffect(() => {
     void load()
@@ -1108,6 +1172,21 @@ function CrudSection({ section }: { section: Section }) {
                         })}
                         <Table.Td>
                           <Group gap="xs">
+                            {section.key === 'programs' ? (
+                              <Tooltip label="Ver semestres" withArrow>
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="indigo"
+                                  aria-label="Ver detalle"
+                                  onClick={() => {
+                                    setSelectedProgram(row)
+                                    setShowProgramDetail(true)
+                                  }}
+                                >
+                                  <IconEye size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                            ) : null}
                             <Tooltip label="Editar" withArrow>
                               <ActionIcon
                                 variant="subtle"
@@ -1153,6 +1232,140 @@ function CrudSection({ section }: { section: Section }) {
           )}
         </Stack>
       </Card>
+      {section.key === 'programs' && selectedProgram ? (
+        <Drawer
+          opened={showProgramDetail}
+          onClose={() => {
+            setShowProgramDetail(false)
+            setSelectedProgram(null)
+          }}
+          title="Detalle del programa"
+          position="right"
+          size="lg"
+          padding="lg"
+        >
+          <Stack gap="lg">
+            <Stack gap="xs">
+              <Text size="xs" tt="uppercase" fw={600} c="dimmed">Programa académico</Text>
+              <Title order={3}>{selectedProgram.name}</Title>
+              <Group gap="xs">
+                {selectedProgram.code ? (
+                  <Badge color="dark" variant="light">Código {selectedProgram.code}</Badge>
+                ) : null}
+                {selectedProgram.level ? (
+                  <Badge color="indigo" variant="light">Nivel {selectedProgram.level}</Badge>
+                ) : null}
+                {typeof selectedProgram.duration_semesters === 'number' ? (
+                  <Badge color="gray" variant="light">Duración {selectedProgram.duration_semesters} semestres</Badge>
+                ) : null}
+              </Group>
+              {selectedProgram.description ? (
+                <Text size="sm" c="dimmed">{selectedProgram.description}</Text>
+              ) : null}
+            </Stack>
+
+            <Divider label="Semestres asociados" labelPosition="center" />
+
+            {(() => {
+              const semesters = (programSemesters || [])
+                .filter((semester) => semester.program_id === selectedProgram.id)
+                .sort((a, b) => (Number(a.semester_number) || 0) - (Number(b.semester_number) || 0))
+
+              if (semesters.length === 0) {
+                return (
+                  <Card withBorder radius="md" padding="lg">
+                    <Text size="sm" c="dimmed">Este programa aún no tiene semestres configurados.</Text>
+                  </Card>
+                )
+              }
+
+              const relevantCourses = Array.isArray(courses) ? courses : []
+              const subjectMap = Array.isArray(subjects)
+                ? new Map(subjects.map((subject: any) => [subject.id, subject]))
+                : new Map()
+              const semesterMap = new Map(semesters.map((semester) => [semester.id, semester]))
+
+              const subjectsBySemester = new Map<number, any[]>()
+              for (const course of relevantCourses) {
+                const semesterId = course?.program_semester_id
+                if (semesterId == null) continue
+                if (!semesterMap.has(semesterId)) continue
+                const subject = subjectMap.get(course?.subject_id)
+                if (!subject) continue
+                if (subject.program_id && subject.program_id !== selectedProgram.id) continue
+                const list = subjectsBySemester.get(semesterId)
+                if (list) {
+                  if (!list.some((item) => item.id === subject.id)) list.push(subject)
+                } else {
+                  subjectsBySemester.set(semesterId, [subject])
+                }
+              }
+
+              return (
+                <Accordion variant="separated" radius="md" transitionDuration={200} defaultValue={String(semesters[0].id)}>
+                  {semesters.map((semester) => {
+                    const semesterSubjects = [...(subjectsBySemester.get(semester.id) ?? [])].sort((a, b) => {
+                      const nameA = (a?.name || a?.label || '').toString().toLowerCase()
+                      const nameB = (b?.name || b?.label || '').toString().toLowerCase()
+                      if (nameA && nameB) return nameA.localeCompare(nameB)
+                      return (a?.id ?? 0) > (b?.id ?? 0) ? 1 : -1
+                    })
+                    return (
+                      <Accordion.Item key={semester.id} value={String(semester.id)}>
+                        <Accordion.Control icon={<Badge color={semester.is_active ? 'teal' : 'gray'} variant="light">{semester.is_active ? 'Activo' : 'Inactivo'}</Badge>}>
+                          Semestre {semester.semester_number ?? '—'} · {semester.label || `ID ${semester.id}`}
+                        </Accordion.Control>
+                        <Accordion.Panel>
+                          <Stack gap="md">
+                            <Stack gap="xs">
+                              <Text size="sm">Identificador interno: {semester.id}</Text>
+                              <Text size="sm">Número de semestre: {semester.semester_number ?? 'No especificado'}</Text>
+                              {semester.label ? <Text size="sm">Etiqueta: {semester.label}</Text> : null}
+                              {semester.description ? (
+                                <Text size="sm" c="dimmed">{semester.description}</Text>
+                              ) : null}
+                            </Stack>
+                            <Divider label="Asignaturas vinculadas" labelPosition="center" />
+                            {semesterSubjects.length === 0 ? (
+                              <Text size="sm" c="dimmed">
+                                Aún no hay asignaturas asociadas a este semestre.
+                              </Text>
+                            ) : (
+                              <Stack gap="sm">
+                                {semesterSubjects.map((subject) => (
+                                  <Paper key={subject.id} withBorder radius="md" p="md">
+                                    <Group justify="space-between" align="flex-start" gap="sm">
+                                      <div>
+                                        <Text fw={600}>{subject.name}</Text>
+                                        {subject.description ? (
+                                          <Text size="xs" c="dimmed">{subject.description}</Text>
+                                        ) : null}
+                                      </div>
+                                      <Stack gap={4} align="flex-end">
+                                        {subject.code ? (
+                                          <Badge color="dark" variant="light">{subject.code}</Badge>
+                                        ) : null}
+                                        {typeof subject.credits === 'number' ? (
+                                          <Badge color="indigo" variant="light">{subject.credits} crédito{subject.credits === 1 ? '' : 's'}</Badge>
+                                        ) : null}
+                                      </Stack>
+                                    </Group>
+                                  </Paper>
+                                ))}
+                              </Stack>
+                            )}
+                          </Stack>
+                        </Accordion.Panel>
+                      </Accordion.Item>
+                    )
+                  })}
+                </Accordion>
+              )
+            })()}
+          </Stack>
+        </Drawer>
+      ) : null}
+
     </Stack>
   )
 }
