@@ -7,6 +7,7 @@ from .seed import ensure_default_admin, ensure_demo_data
 from .routers import auth, students
 from .routers import schedule, teachers, subjects, rooms, courses, users
 from .routers import enrollments, evaluations, grades, attendance, timeslots, course_schedules, programs, program_semesters, settings
+from .routers import student_schedule
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(students.router)
 app.include_router(schedule.router)
+app.include_router(student_schedule.router)
 app.include_router(teachers.router)
 app.include_router(subjects.router)
 app.include_router(rooms.router)

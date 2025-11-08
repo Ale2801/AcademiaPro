@@ -11,12 +11,12 @@ router = APIRouter(prefix="/rooms", tags=["rooms"])
 
 
 @router.get("/", response_model=List[Room])
-def list_rooms(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_rooms(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     return session.exec(select(Room)).all()
 
 
 @router.post("/", response_model=Room)
-def create_room(room: Room, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_room(room: Room, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     session.add(room)
     session.commit()
     session.refresh(room)
@@ -24,7 +24,7 @@ def create_room(room: Room, session=Depends(get_session), user=Depends(require_r
 
 
 @router.get("/{room_id}", response_model=Room)
-def get_room(room_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def get_room(room_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     obj = session.get(Room, room_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Sala no encontrada")
@@ -32,7 +32,7 @@ def get_room(room_id: int, session=Depends(get_session), user=Depends(require_ro
 
 
 @router.put("/{room_id}", response_model=Room)
-def update_room(room_id: int, payload: Room, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_room(room_id: int, payload: Room, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Room, room_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Sala no encontrada")
@@ -45,7 +45,7 @@ def update_room(room_id: int, payload: Room, session=Depends(get_session), user=
 
 
 @router.delete("/{room_id}")
-def delete_room(room_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_room(room_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Room, room_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Sala no encontrada")

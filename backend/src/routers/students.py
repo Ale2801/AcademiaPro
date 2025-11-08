@@ -11,12 +11,12 @@ router = APIRouter(prefix="/students", tags=["students"])
 
 
 @router.get("/", response_model=List[Student])
-def list_students(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_students(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     return session.exec(select(Student)).all()
 
 
 @router.post("/", response_model=Student)
-def create_student(student: Student, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_student(student: Student, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     program = session.get(Program, student.program_id)
     if not program:
         raise HTTPException(status_code=404, detail="Programa no encontrado")
@@ -27,7 +27,7 @@ def create_student(student: Student, session=Depends(get_session), user=Depends(
 
 
 @router.get("/{student_id}", response_model=Student)
-def get_student(student_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def get_student(student_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     obj = session.get(Student, student_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado")
@@ -35,7 +35,7 @@ def get_student(student_id: int, session=Depends(get_session), user=Depends(requ
 
 
 @router.put("/{student_id}", response_model=Student)
-def update_student(student_id: int, payload: Student, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_student(student_id: int, payload: Student, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Student, student_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado")
@@ -53,7 +53,7 @@ def update_student(student_id: int, payload: Student, session=Depends(get_sessio
 
 
 @router.delete("/{student_id}")
-def delete_student(student_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_student(student_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Student, student_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado")

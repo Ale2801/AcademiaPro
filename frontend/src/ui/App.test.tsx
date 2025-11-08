@@ -23,6 +23,7 @@ function renderWithRouter(ui: React.ReactElement) {
         <Routes>
           <Route path="/" element={ui} />
           <Route path="/dashboard/admin" element={<div>Panel de Administrador</div>} />
+          <Route path="/dashboard/coordinator" element={<div>Panel de Coordinador</div>} />
           <Route path="/dashboard/teacher" element={<div>Teacher Dashboard</div>} />
           <Route path="/dashboard/student" element={<div>Student Dashboard</div>} />
         </Routes>

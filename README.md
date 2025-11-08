@@ -171,5 +171,6 @@ frontend/
 
 ## Usuarios demo
 - Admin: `admin@academiapro.dev` / `admin123`
+- Coordinador académico: `coordinador@academiapro.dev` / `coordinador123`
 
 Con estos credenciales puedes experimentar con el panel administrativo, modificar ajustes de marca y generar propuestas de horarios desde la vista del optimizador.

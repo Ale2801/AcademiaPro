@@ -47,6 +47,14 @@ def init_db():
     # Asegurar columnas nuevas en instalaciones existentes sin migraciones aplicadas
     _ensure_column(engine, "courseschedule", "duration_minutes", "duration_minutes INTEGER")
     _ensure_column(engine, "courseschedule", "start_offset_minutes", "start_offset_minutes INTEGER")
+    _ensure_column(engine, "program", "is_active", "is_active BOOLEAN NOT NULL DEFAULT 1")
+    # Estado del semestre académico para instalaciones sin migración
+    _ensure_column(engine, "programsemester", "state", "state VARCHAR(20) DEFAULT 'planned'")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("UPDATE programsemester SET state = 'planned' WHERE state IS NULL"))
+    except SQLAlchemyError:
+        pass
 
 
 def get_session() -> Generator[Session, None, None]:

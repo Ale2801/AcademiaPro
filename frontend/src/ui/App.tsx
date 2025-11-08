@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { useAuth } from '../lib/auth'
 import { Admin } from './Admin'
 import { api } from '../lib/api'
 import {
   Container,
+  Center,
   Paper,
   Title,
   Text,
@@ -32,6 +33,7 @@ import {
   Menu,
   Indicator,
   Avatar,
+  Loader,
   rem,
 } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
@@ -72,6 +74,49 @@ export function App() {
   const [error, setError] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
 
+  const handleLogin = useCallback(async (emailValue: string, passwordValue: string) => {
+    setError(undefined)
+    setLoading(true)
+    try {
+      await login(emailValue, passwordValue)
+      const base64 = (s: string) =>
+        decodeURIComponent(
+          atob(s.replace(/-/g, '+').replace(/_/g, '/'))
+            .split('')
+            .map((c) => `%${('00' + c.charCodeAt(0).toString(16)).slice(-2)}`)
+            .join('')
+        )
+      const hdr = api.defaults.headers.common['Authorization']
+      const headerToken = typeof hdr === 'string' && hdr.startsWith('Bearer ') ? hdr.slice(7) : ''
+      const stored = localStorage.getItem('authToken') || ''
+      const tokenValue = (stored || headerToken).trim()
+      try {
+        const [, payload] = tokenValue.split('.')
+        const json = JSON.parse(base64(payload))
+        const role = json.role || 'admin'
+  if (role === 'admin') navigate('/dashboard/admin')
+  else if (role === 'coordinator') navigate('/dashboard/coordinator')
+  else if (role === 'teacher') navigate('/dashboard/teacher')
+  else navigate('/dashboard/student')
+      } catch {
+        navigate('/dashboard/admin')
+      }
+    } catch (e: any) {
+      setError(String(e.message || e))
+    } finally {
+      setLoading(false)
+    }
+  }, [login, navigate])
+
+  const handleQuickLogin = useCallback(
+    (emailValue: string, passwordValue: string) => {
+      setEmail(emailValue)
+      setPassword(passwordValue)
+      void handleLogin(emailValue, passwordValue)
+    },
+    [handleLogin]
+  )
+
   useEffect(() => {
     if (!token) {
       setStudents([])
@@ -80,7 +125,7 @@ export function App() {
     }
     const controller = new AbortController()
     setError(undefined)
-  api.get('/students/', { signal: controller.signal })
+    api.get('/students/', { signal: controller.signal })
       .then(r => setStudents(r.data))
       .catch((e: any) => {
         // Ignora errores por cancelación al cambiar de token o desmontar
@@ -114,6 +159,20 @@ export function App() {
     }
   }, [token])
 
+  const roleTarget = useMemo(() => {
+    if (!token) return null
+    const role = currentUser?.role || 'admin'
+  if (role === 'coordinator') return '/dashboard/coordinator'
+  if (role === 'teacher') return '/dashboard/teacher'
+    if (role === 'student') return '/dashboard/student'
+    return '/dashboard/admin'
+  }, [currentUser?.role, token])
+
+  useEffect(() => {
+    if (!token || !roleTarget) return
+    navigate(roleTarget, { replace: true })
+  }, [navigate, roleTarget, token])
+
   const insights = useMemo(
     () => [
       { label: 'Estudiantes activos', value: students.length || 0, diff: '+12% vs. mes anterior', icon: IconUsersGroup },
@@ -144,6 +203,14 @@ export function App() {
     { title: 'Repositorio institucional', description: 'Documentos oficiales, reglamentos y expedientes digitalizados.', icon: IconDatabase },
   ]
 
+  if (token) {
+    return (
+      <Center style={{ minHeight: '100svh' }}>
+        <Loader color="indigo" size="lg" />
+      </Center>
+    )
+  }
+
   return (
     !token ? (
       // Vista de login a pantalla completa, sin Navbar
@@ -163,33 +230,7 @@ export function App() {
               <TextInput label="Email" placeholder="tu@correo.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
               <PasswordInput label="Contraseña" placeholder="********" value={password} onChange={(e) => setPassword(e.target.value)} required />
               {error && <Text c="red" size="sm">{error}</Text>}
-              <Button loading={loading} onClick={async () => {
-                    setError(undefined)
-                    setLoading(true)
-                    try {
-                      await login(email, password)
-                      const base64 = (s: string) => decodeURIComponent(atob(s.replace(/-/g, '+').replace(/_/g, '/')).split('').map(c => '%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''))
-                      // persistimos token para decodificarlo sin depender del header
-                      const hdr = api.defaults.headers.common['Authorization']
-                      const headerToken = typeof hdr === 'string' && hdr.startsWith('Bearer ') ? hdr.slice(7) : ''
-                      const stored = localStorage.getItem('authToken') || ''
-                      const t = (stored || headerToken).trim()
-                      try {
-                        const [, payload] = t.split('.')
-                        const json = JSON.parse(base64(payload))
-                        const role = json.role || 'admin'
-                        if (role === 'admin') navigate('/dashboard/admin')
-                        else if (role === 'teacher') navigate('/dashboard/teacher')
-                        else navigate('/dashboard/student')
-                      } catch {
-                        navigate('/dashboard/admin')
-                      }
-                    } catch (e: any) {
-                      setError(String(e.message || e))
-                    } finally {
-                      setLoading(false)
-                    }
-                  }}>Entrar</Button>
+              <Button loading={loading} onClick={() => handleLogin(email, password)}>Entrar</Button>
               <Group justify="space-between">
                 <Text size="sm" c="dimmed">¿No tienes cuenta?</Text>
                 <Anchor component="button" size="sm" onClick={async () => {
@@ -205,6 +246,50 @@ export function App() {
                       }
                     }}>Crear administrador</Anchor>
               </Group>
+              <Divider label="Accesos rápidos" labelPosition="center" my="sm" />
+              <Stack gap="xs">
+                {[
+                  {
+                    label: 'Entrar como administrador demo',
+                    email: 'admin@academiapro.dev',
+                    password: 'admin123',
+                    color: 'dark',
+                    icon: IconUserShield,
+                  },
+                  {
+                    label: 'Entrar como coordinador demo',
+                    email: 'coordinador@academiapro.dev',
+                    password: 'coordinador123',
+                    color: 'violet',
+                    icon: IconCalendarStats,
+                  },
+                  {
+                    label: 'Entrar como docente demo',
+                    email: 'docente1@academiapro.dev',
+                    password: 'teacher123',
+                    color: 'indigo',
+                    icon: IconSchool,
+                  },
+                  {
+                    label: 'Entrar como estudiante demo',
+                    email: 'estudiante1@academiapro.dev',
+                    password: 'student123',
+                    color: 'teal',
+                    icon: IconMoodSmile,
+                  },
+                ].map(({ label, email: quickEmail, password: quickPassword, color, icon: Icon }) => (
+                  <Button
+                    key={label}
+                    variant="light"
+                    color={color}
+                    leftSection={<Icon size={16} />}
+                    onClick={() => handleQuickLogin(quickEmail, quickPassword)}
+                    disabled={loading}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </Stack>
             </Stack>
           </Paper>
         </Container>

@@ -52,7 +52,7 @@ def _time_key(day: int, start: dt_time, end: dt_time, campus: str | None, commen
 
 
 @router.post("/bulk")
-def bulk_upsert_timeslots(payload: TimeslotBulkRequest, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def bulk_upsert_timeslots(payload: TimeslotBulkRequest, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	try:
 		slots = payload.slots
 	except ValueError as exc:  # Validación extra; en teoría Pydantic ya bloquea estos valores
@@ -113,12 +113,12 @@ def bulk_upsert_timeslots(payload: TimeslotBulkRequest, session=Depends(get_sess
 
 
 @router.get("/", response_model=List[Timeslot])
-def list_timeslots(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_timeslots(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	return session.exec(select(Timeslot)).all()
 
 
 @router.post("/", response_model=Timeslot)
-def create_timeslot(timeslot: Timeslot, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_timeslot(timeslot: Timeslot, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	# Asegura tipos nativos para SQLite
 	if isinstance(timeslot.start_time, str):
 		timeslot.start_time = dt_time.fromisoformat(timeslot.start_time)
@@ -131,7 +131,7 @@ def create_timeslot(timeslot: Timeslot, session=Depends(get_session), user=Depen
 
 
 @router.get("/{timeslot_id}", response_model=Timeslot)
-def get_timeslot(timeslot_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def get_timeslot(timeslot_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	obj = session.get(Timeslot, timeslot_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Bloque horario no encontrado")
@@ -139,7 +139,7 @@ def get_timeslot(timeslot_id: int, session=Depends(get_session), user=Depends(re
 
 
 @router.put("/{timeslot_id}", response_model=Timeslot)
-def update_timeslot(timeslot_id: int, payload: Timeslot, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_timeslot(timeslot_id: int, payload: Timeslot, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Timeslot, timeslot_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Bloque horario no encontrado")
@@ -157,7 +157,7 @@ def update_timeslot(timeslot_id: int, payload: Timeslot, session=Depends(get_ses
 
 
 @router.delete("/{timeslot_id}")
-def delete_timeslot(timeslot_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_timeslot(timeslot_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Timeslot, timeslot_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Bloque horario no encontrado")

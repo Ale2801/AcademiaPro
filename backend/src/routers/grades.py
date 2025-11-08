@@ -11,12 +11,12 @@ router = APIRouter(prefix="/grades", tags=["grades"])
 
 
 @router.get("/", response_model=List[Grade])
-def list_grades(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_grades(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	return session.exec(select(Grade)).all()
 
 
 @router.post("/", response_model=Grade)
-def create_grade(grade: Grade, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def create_grade(grade: Grade, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	session.add(grade)
 	session.commit()
 	session.refresh(grade)
@@ -24,7 +24,7 @@ def create_grade(grade: Grade, session=Depends(get_session), user=Depends(requir
 
 
 @router.get("/{grade_id}", response_model=Grade)
-def get_grade(grade_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher", "student"))):
+def get_grade(grade_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
 	obj = session.get(Grade, grade_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Nota no encontrada")
@@ -32,7 +32,7 @@ def get_grade(grade_id: int, session=Depends(get_session), user=Depends(require_
 
 
 @router.put("/{grade_id}", response_model=Grade)
-def update_grade(grade_id: int, payload: Grade, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def update_grade(grade_id: int, payload: Grade, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	obj = session.get(Grade, grade_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Nota no encontrada")
@@ -45,7 +45,7 @@ def update_grade(grade_id: int, payload: Grade, session=Depends(get_session), us
 
 
 @router.delete("/{grade_id}")
-def delete_grade(grade_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_grade(grade_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Grade, grade_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Nota no encontrada")

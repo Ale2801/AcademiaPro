@@ -14,7 +14,7 @@ router = APIRouter(prefix="/courses", tags=["courses"])
 def list_courses(
     program_semester_id: Optional[int] = None,
     session=Depends(get_session),
-    user=Depends(require_roles("admin", "teacher", "student"))
+    user=Depends(require_roles("admin", "coordinator", "teacher", "student"))
 ):
     stmt = select(Course)
     if program_semester_id is not None:
@@ -23,7 +23,7 @@ def list_courses(
 
 
 @router.post("/", response_model=Course)
-def create_course(course: Course, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_course(course: Course, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     semester = session.get(ProgramSemester, course.program_semester_id)
     if not semester:
         raise HTTPException(status_code=404, detail="Semestre de programa no encontrado")
@@ -34,7 +34,7 @@ def create_course(course: Course, session=Depends(get_session), user=Depends(req
 
 
 @router.get("/{course_id}", response_model=Course)
-def get_course(course_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher", "student"))):
+def get_course(course_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     obj = session.get(Course, course_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -42,7 +42,7 @@ def get_course(course_id: int, session=Depends(get_session), user=Depends(requir
 
 
 @router.put("/{course_id}", response_model=Course)
-def update_course(course_id: int, payload: Course, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_course(course_id: int, payload: Course, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Course, course_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -60,7 +60,7 @@ def update_course(course_id: int, payload: Course, session=Depends(get_session),
 
 
 @router.delete("/{course_id}")
-def delete_course(course_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_course(course_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Course, course_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Curso no encontrado")

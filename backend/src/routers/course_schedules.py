@@ -15,7 +15,7 @@ router = APIRouter(prefix="/course-schedules", tags=["course_schedules"])
 def list_course_schedules(
 	program_semester_id: int | None = None,
 	session=Depends(get_session),
-	user=Depends(require_roles("admin", "teacher"))
+	user=Depends(require_roles("admin", "coordinator", "teacher"))
 ):
 	stmt = select(CourseSchedule)
 	if program_semester_id is not None:
@@ -24,7 +24,7 @@ def list_course_schedules(
 
 
 @router.post("/", response_model=CourseSchedule)
-def create_course_schedule(cs: CourseSchedule, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_course_schedule(cs: CourseSchedule, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	course = session.get(Course, cs.course_id)
 	if not course:
 		raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -55,7 +55,7 @@ def create_course_schedule(cs: CourseSchedule, session=Depends(get_session), use
 
 
 @router.get("/{cs_id}", response_model=CourseSchedule)
-def get_course_schedule(cs_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def get_course_schedule(cs_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	obj = session.get(CourseSchedule, cs_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Horario de curso no encontrado")
@@ -63,7 +63,7 @@ def get_course_schedule(cs_id: int, session=Depends(get_session), user=Depends(r
 
 
 @router.put("/{cs_id}", response_model=CourseSchedule)
-def update_course_schedule(cs_id: int, payload: CourseSchedule, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_course_schedule(cs_id: int, payload: CourseSchedule, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(CourseSchedule, cs_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Horario de curso no encontrado")
@@ -109,7 +109,7 @@ def update_course_schedule(cs_id: int, payload: CourseSchedule, session=Depends(
 
 
 @router.delete("/{cs_id}")
-def delete_course_schedule(cs_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_course_schedule(cs_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(CourseSchedule, cs_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Horario de curso no encontrado")

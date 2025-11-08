@@ -11,12 +11,12 @@ router = APIRouter(prefix="/teachers", tags=["teachers"])
 
 
 @router.get("/", response_model=List[Teacher])
-def list_teachers(session=Depends(get_session), user=Depends(require_roles("admin"))):
+def list_teachers(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     return session.exec(select(Teacher)).all()
 
 
 @router.post("/", response_model=Teacher)
-def create_teacher(teacher: Teacher, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_teacher(teacher: Teacher, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     session.add(teacher)
     session.commit()
     session.refresh(teacher)
@@ -24,7 +24,7 @@ def create_teacher(teacher: Teacher, session=Depends(get_session), user=Depends(
 
 
 @router.get("/{teacher_id}", response_model=Teacher)
-def get_teacher(teacher_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def get_teacher(teacher_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     obj = session.get(Teacher, teacher_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Profesor no encontrado")
@@ -32,7 +32,7 @@ def get_teacher(teacher_id: int, session=Depends(get_session), user=Depends(requ
 
 
 @router.put("/{teacher_id}", response_model=Teacher)
-def update_teacher(teacher_id: int, payload: Teacher, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_teacher(teacher_id: int, payload: Teacher, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Teacher, teacher_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Profesor no encontrado")
@@ -45,7 +45,7 @@ def update_teacher(teacher_id: int, payload: Teacher, session=Depends(get_sessio
 
 
 @router.delete("/{teacher_id}")
-def delete_teacher(teacher_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_teacher(teacher_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     obj = session.get(Teacher, teacher_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Profesor no encontrado")

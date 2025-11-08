@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = '20241015_partial'
@@ -18,10 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('courseschedule', sa.Column('duration_minutes', sa.Integer(), nullable=True))
-    op.add_column('courseschedule', sa.Column('start_offset_minutes', sa.Integer(), nullable=True))
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    existing_columns = {column['name'] for column in inspector.get_columns('courseschedule')}
+
+    if 'duration_minutes' not in existing_columns:
+        op.add_column('courseschedule', sa.Column('duration_minutes', sa.Integer(), nullable=True))
+    if 'start_offset_minutes' not in existing_columns:
+        op.add_column('courseschedule', sa.Column('start_offset_minutes', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column('courseschedule', 'start_offset_minutes')
-    op.drop_column('courseschedule', 'duration_minutes')
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    existing_columns = {column['name'] for column in inspector.get_columns('courseschedule')}
+
+    if 'start_offset_minutes' in existing_columns:
+        op.drop_column('courseschedule', 'start_offset_minutes')
+    if 'duration_minutes' in existing_columns:
+        op.drop_column('courseschedule', 'duration_minutes')

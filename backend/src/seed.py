@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from sqlmodel import Session, select
 
@@ -19,6 +19,7 @@ from .models import (
     Room,
     RoomTypeEnum,
     Student,
+    StudentProgramEnrollment,
     StudentStatusEnum,
     Subject,
     Teacher,
@@ -26,13 +27,18 @@ from .models import (
     User,
     Evaluation,
     Grade,
+    ProgramEnrollmentStatusEnum,
 )
-from .security import get_password_hash
+from .security import get_password_hash, verify_password
 
 
 DEFAULT_ADMIN_EMAIL = "admin@academiapro.dev"
 DEFAULT_ADMIN_PASSWORD = "admin123"
 DEFAULT_ADMIN_NAME = "Administrador Demo"
+
+DEFAULT_COORDINATOR_EMAIL = "coordinador@academiapro.dev"
+DEFAULT_COORDINATOR_PASSWORD = "coordinador123"
+DEFAULT_COORDINATOR_NAME = "Coordinación Académica"
 
 
 def ensure_default_admin(session: Optional[Session] = None) -> User:
@@ -42,6 +48,20 @@ def ensure_default_admin(session: Optional[Session] = None) -> User:
     try:
         existing = session.exec(select(User).where(User.email == DEFAULT_ADMIN_EMAIL)).first()
         if existing:
+            updated = False
+            if not verify_password(DEFAULT_ADMIN_PASSWORD, existing.hashed_password):
+                existing.hashed_password = get_password_hash(DEFAULT_ADMIN_PASSWORD)
+                updated = True
+            if existing.role != "admin":
+                existing.role = "admin"
+                updated = True
+            if not existing.is_active:
+                existing.is_active = True
+                updated = True
+            if updated:
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
             return existing
         user = User(
             email=DEFAULT_ADMIN_EMAIL,
@@ -59,11 +79,61 @@ def ensure_default_admin(session: Optional[Session] = None) -> User:
             session.close()
 
 
+def ensure_default_coordinator(session: Optional[Session] = None) -> User:
+    """Create an academic coordinator account to operate scheduling workflows."""
+    owns_session = session is None
+    session = session or Session(engine)
+    try:
+        existing = session.exec(select(User).where(User.email == DEFAULT_COORDINATOR_EMAIL)).first()
+        if existing:
+            updated = False
+            if not verify_password(DEFAULT_COORDINATOR_PASSWORD, existing.hashed_password):
+                existing.hashed_password = get_password_hash(DEFAULT_COORDINATOR_PASSWORD)
+                updated = True
+            if existing.role != "coordinator":
+                existing.role = "coordinator"
+                updated = True
+            if not existing.is_active:
+                existing.is_active = True
+                updated = True
+            if updated:
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
+            return existing
+        user = User(
+            email=DEFAULT_COORDINATOR_EMAIL,
+            full_name=DEFAULT_COORDINATOR_NAME,
+            hashed_password=get_password_hash(DEFAULT_COORDINATOR_PASSWORD),
+            role="coordinator",
+            is_active=True,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return user
+    finally:
+        if owns_session:
+            session.close()
+
+
+def ensure_app_settings(session: Optional[Session] = None) -> None:
+    """Guarantee that the base application settings exist."""
+    owns_session = session is None
+    session = session or Session(engine)
+    try:
+        _ensure_app_settings(session)
+    finally:
+        if owns_session:
+            session.close()
+
+
 def ensure_demo_data() -> None:
     """Populate the main catalog tables with deterministic demo data for the UI."""
     with Session(engine) as session:
         ensure_default_admin(session)
-        _ensure_app_settings(session)
+        ensure_default_coordinator(session)
+        ensure_app_settings(session)
 
         program_map = _ensure_programs(session)
         semester_map = _ensure_program_semesters(session, program_map)
@@ -75,6 +145,7 @@ def ensure_demo_data() -> None:
         _ensure_course_schedules(session, course_map, room_map, timeslot_map)
         student_map = _ensure_students(session, program_map)
         enrollment_map = _ensure_enrollments(session, student_map, course_map)
+        _ensure_student_program_enrollments(session, student_map, program_map, semester_map)
         evaluation_map = _ensure_evaluations(session, course_map)
         _ensure_grades(session, enrollment_map, evaluation_map)
         _ensure_attendance(session, enrollment_map)
@@ -156,7 +227,10 @@ def _ensure_app_settings(session: Session) -> None:
             dirty = True
             continue
         updated = False
-        for field in ("value", "label", "description", "category", "is_public"):
+        if setting.value is None and item["value"] is not None:
+            setting.value = item["value"]
+            updated = True
+        for field in ("label", "description", "category", "is_public"):
             if getattr(setting, field) != item[field]:
                 setattr(setting, field, item[field])
                 updated = True
@@ -1507,11 +1581,11 @@ def _ensure_courses(
         {"key": "MAT201-2025-1-A", "subject_code": "MAT201", "teacher_email": "docente1@academiapro.dev", 
          "term": "2025-1", "group": "A", "weekly_hours": 5, "capacity": 40, 
          "modality": ModalityEnum.in_person, "program_code": "ING-SIS", "semester_number": 2},
-        {"key": "PRO201-2025-1-A", "subject_code": "PRO201", "teacher_email": "docente2@academiapro.dev", 
-         "term": "2025-1", "group": "A", "weekly_hours": 4, "capacity": 35, 
+    {"key": "PRO201-2025-1-A", "subject_code": "PRO201", "teacher_email": "docente2@academiapro.dev", 
+     "term": "2025-1", "group": "A", "weekly_hours": 4, "capacity": 2, 
          "modality": ModalityEnum.hybrid, "program_code": "ING-SIS", "semester_number": 2},
-        {"key": "PRO201-2025-1-B", "subject_code": "PRO201", "teacher_email": "docente4@academiapro.dev", 
-         "term": "2025-1", "group": "B", "weekly_hours": 4, "capacity": 35, 
+    {"key": "PRO201-2025-1-B", "subject_code": "PRO201", "teacher_email": "docente4@academiapro.dev", 
+     "term": "2025-1", "group": "B", "weekly_hours": 4, "capacity": 2, 
          "modality": ModalityEnum.hybrid, "program_code": "ING-SIS", "semester_number": 2},
         {"key": "EST201-2025-1-A", "subject_code": "EST201", "teacher_email": "docente11@academiapro.dev", 
          "term": "2025-1", "group": "A", "weekly_hours": 4, "capacity": 35, 
@@ -2048,20 +2122,21 @@ def _ensure_enrollments(
     course_map: Dict[str, Course],
 ) -> Dict[str, Enrollment]:
     enrollment_plan = {
-        "estudiante1@academiapro.dev": ["MAT101-2025-1-A", "PRO201-2025-1-A", "BD301-2025-1-A"],
+        "estudiante1@academiapro.dev": ["MAT101-2025-1-A", "BD301-2025-1-A"],
         "estudiante2@academiapro.dev": ["ADM120-2025-1-A", "ADM210-2025-1-A"],
         "estudiante3@academiapro.dev": ["DS501-2025-1-A", "DS530-2025-1-A"],
-        "estudiante4@academiapro.dev": ["MAT101-2025-1-B", "SIS320-2025-1-A"],
+        "estudiante4@academiapro.dev": ["MAT101-2025-1-B", "SIS320-2025-1-A", "PRO201-2025-1-A"],
         "estudiante5@academiapro.dev": ["ADM210-2025-1-A", "ADM315-2025-1-A"],
         "estudiante6@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A"],
         "estudiante7@academiapro.dev": ["MAT101-2025-1-A", "PRO201-2025-1-B"],
         "estudiante8@academiapro.dev": ["ADM120-2025-1-A", "ADM315-2025-1-A"],
-        "estudiante9@academiapro.dev": ["MAT101-2025-1-B", "BD301-2025-1-A", "SIS320-2025-1-A"],
+        "estudiante9@academiapro.dev": ["MAT101-2025-1-B", "BD301-2025-1-A", "SIS320-2025-1-A", "PRO201-2025-1-A"],
         "estudiante10@academiapro.dev": ["DS501-2025-1-A", "DS510-2025-1-A"],
         "estudiante11@academiapro.dev": ["ADM210-2025-1-A", "ADM315-2025-1-A"],
-        "estudiante12@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A", "PRO201-2025-1-B"],
+    "estudiante12@academiapro.dev": ["DS510-2025-1-A", "DS530-2025-1-A"],
         "estudiante13@academiapro.dev": ["IND130-2025-1-A", "IND240-2025-1-A"],
         "estudiante14@academiapro.dev": ["IND130-2025-1-A"],
+    "estudiante16@academiapro.dev": ["PRO201-2025-1-B", "ALG201-2025-1-A"],
     }
 
     data = [
@@ -2095,6 +2170,92 @@ def _ensure_enrollments(
         key = f"{item['student_email']}|{item['course_key']}"
         mapping[key] = enrollment
     return mapping
+
+
+def _ensure_student_program_enrollments(
+    session: Session,
+    student_map: Dict[str, Student],
+    program_map: Dict[str, Program],
+    semester_map: Dict[str, ProgramSemester],
+) -> None:
+    manual_assignments: Dict[str, int] = {
+        "estudiante1@academiapro.dev": 2,
+        "estudiante4@academiapro.dev": 2,
+        "estudiante7@academiapro.dev": 2,
+        "estudiante9@academiapro.dev": 2,
+        "estudiante15@academiapro.dev": 2,
+        "estudiante16@academiapro.dev": 2,
+    }
+
+    program_code_by_id = {program.id: code for code, program in program_map.items()}
+
+    for email, student in student_map.items():
+        program_code = program_code_by_id.get(student.program_id)
+        if not program_code:
+            continue
+
+        target_semester: Optional[ProgramSemester] = None
+        manual_number = manual_assignments.get(email)
+        if manual_number:
+            target_semester = semester_map.get(f"{program_code}:{manual_number}")
+
+        if not target_semester:
+            enrollment_rows = session.exec(
+                select(Course.program_semester_id)
+                .join(Enrollment, Enrollment.course_id == Course.id)
+                .where(Enrollment.student_id == student.id)
+            ).all()
+            semester_candidates: List[ProgramSemester] = []
+            for row in enrollment_rows:
+                semester_id = row[0] if isinstance(row, tuple) else row
+                if semester_id:
+                    semester_obj = session.get(ProgramSemester, semester_id)
+                    if semester_obj and semester_obj.program_id == student.program_id:
+                        semester_candidates.append(semester_obj)
+            if semester_candidates:
+                semester_candidates.sort(key=lambda item: item.semester_number, reverse=True)
+                target_semester = semester_candidates[0]
+
+        if not target_semester:
+            target_semester = semester_map.get(f"{program_code}:1")
+
+        if not target_semester:
+            continue
+
+        existing_records = session.exec(
+            select(StudentProgramEnrollment).where(StudentProgramEnrollment.student_id == student.id)
+        ).all()
+        now = datetime.utcnow()
+        target_record = next((record for record in existing_records if record.program_semester_id == target_semester.id), None)
+
+        for record in existing_records:
+            if record.program_semester_id == target_semester.id:
+                record.status = ProgramEnrollmentStatusEnum.active
+                record.enrolled_at = now
+                record.ended_at = None
+                session.add(record)
+            elif record.status == ProgramEnrollmentStatusEnum.active:
+                record.status = ProgramEnrollmentStatusEnum.completed
+                record.ended_at = now
+                session.add(record)
+
+        if not target_record:
+            session.add(
+                StudentProgramEnrollment(
+                    student_id=student.id,
+                    program_semester_id=target_semester.id,
+                    status=ProgramEnrollmentStatusEnum.active,
+                    enrolled_at=now,
+                )
+            )
+
+        if target_semester.label:
+            student.current_term = target_semester.label
+        else:
+            student.current_term = f"Semestre {target_semester.semester_number}"
+        session.add(student)
+
+    session.commit()
 
 
 def _ensure_evaluations(
@@ -2178,7 +2339,7 @@ def _ensure_grades(
             "score": 87.0,
         },
         {
-            "key": ("estudiante1@academiapro.dev", "PRO201-2025-1-A", "Sprint Demo"),
+            "key": ("estudiante4@academiapro.dev", "PRO201-2025-1-A", "Sprint Demo"),
             "score": 92.0,
         },
         {

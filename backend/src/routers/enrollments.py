@@ -11,12 +11,12 @@ router = APIRouter(prefix="/enrollments", tags=["enrollments"])
 
 
 @router.get("/", response_model=List[Enrollment])
-def list_enrollments(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_enrollments(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	return session.exec(select(Enrollment)).all()
 
 
 @router.post("/", response_model=Enrollment)
-def create_enrollment(enrollment: Enrollment, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def create_enrollment(enrollment: Enrollment, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	session.add(enrollment)
 	session.commit()
 	session.refresh(enrollment)
@@ -24,7 +24,7 @@ def create_enrollment(enrollment: Enrollment, session=Depends(get_session), user
 
 
 @router.get("/{enrollment_id}", response_model=Enrollment)
-def get_enrollment(enrollment_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher", "student"))):
+def get_enrollment(enrollment_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
 	obj = session.get(Enrollment, enrollment_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Matrícula no encontrada")
@@ -32,7 +32,7 @@ def get_enrollment(enrollment_id: int, session=Depends(get_session), user=Depend
 
 
 @router.put("/{enrollment_id}", response_model=Enrollment)
-def update_enrollment(enrollment_id: int, payload: Enrollment, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def update_enrollment(enrollment_id: int, payload: Enrollment, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Enrollment, enrollment_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Matrícula no encontrada")
@@ -45,7 +45,7 @@ def update_enrollment(enrollment_id: int, payload: Enrollment, session=Depends(g
 
 
 @router.delete("/{enrollment_id}")
-def delete_enrollment(enrollment_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_enrollment(enrollment_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Enrollment, enrollment_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Matrícula no encontrada")

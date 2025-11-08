@@ -296,7 +296,7 @@ def optimize(
     timeslots: List[TimeslotIn],
     constraints: ConstraintsIn,
     session=Depends(get_session),
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "coordinator")),
 ):
     target_ids = {slot.timeslot_id for slot in timeslots}
     db_slots = session.exec(select(Timeslot).where(Timeslot.id.in_(target_ids))).all()
@@ -404,7 +404,7 @@ def optimize(
 
 
 @router.post("/assignments/save", response_model=List[ScheduleSlotOut])
-def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     context = _load_context(session)
     courses = context["courses"]
     rooms = context["rooms"]
@@ -486,7 +486,7 @@ def save_assignments(payload: SaveAssignmentsRequest, session=Depends(get_sessio
 
 
 @router.post("/assignments/teacher", response_model=Course)
-def assign_teacher(payload: TeacherAssignmentIn, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def assign_teacher(payload: TeacherAssignmentIn, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     course = session.get(Course, payload.course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -501,7 +501,7 @@ def assign_teacher(payload: TeacherAssignmentIn, session=Depends(get_session), u
 
 
 @router.post("/assignments/students", response_model=StudentAssignmentResult)
-def assign_students(payload: StudentAssignmentIn, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def assign_students(payload: StudentAssignmentIn, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
     course = session.get(Course, payload.course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -554,7 +554,7 @@ def schedule_overview(
     program_id: int | None = None,
     program_semester_id: int | None = None,
     session=Depends(get_session),
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "coordinator")),
 ):
     context = _load_context(session)
     semesters = context["semesters"]
@@ -592,14 +592,14 @@ def my_schedule(session=Depends(get_session), user=Depends(get_current_user)):
 
 
 @router.post("/export/excel")
-def export_excel(assignments: List[tuple[int, int, int]], user=Depends(require_roles("admin"))):
+def export_excel(assignments: List[tuple[int, int, int]], user=Depends(require_roles("admin", "coordinator"))):
     path = "/tmp/horario.xlsx"
     export_schedule_excel(assignments, path)
     return {"path": path}
 
 
 @router.post("/export/pdf")
-def export_pdf(assignments: List[tuple[int, int, int]], user=Depends(require_roles("admin"))):
+def export_pdf(assignments: List[tuple[int, int, int]], user=Depends(require_roles("admin", "coordinator"))):
     path = "/tmp/horario.pdf"
     export_schedule_pdf(assignments, path)
     return {"path": path}

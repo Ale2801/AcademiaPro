@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, select
 from ..db import get_session
 from ..models import AppSetting
 from ..security import require_roles
+from ..seed import ensure_app_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -49,6 +50,7 @@ def list_settings(
     session=Depends(get_session),
     user=Depends(require_roles("admin")),
 ):
+    ensure_app_settings(session)
     statement = select(AppSetting)
     if category:
         statement = statement.where(AppSetting.category == category)
@@ -61,6 +63,7 @@ def list_public_settings(
     category: Optional[str] = None,
     session=Depends(get_session),
 ):
+    ensure_app_settings(session)
     statement = select(AppSetting).where(AppSetting.is_public.is_(True))
     if category:
         statement = statement.where(AppSetting.category == category)
@@ -73,6 +76,7 @@ def get_setting(
     session=Depends(get_session),
     user=Depends(require_roles("admin")),
 ):
+    ensure_app_settings(session)
     setting = session.exec(select(AppSetting).where(AppSetting.key == key)).first()
     if not setting:
         raise HTTPException(status_code=404, detail="Configuración no encontrada")

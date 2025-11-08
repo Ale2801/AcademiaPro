@@ -84,6 +84,17 @@ type TimeslotRecord = {
   comment?: string | null
 }
 
+type ProgramRecord = {
+  id: number
+  code?: string
+  name?: string
+  level?: string
+  duration_semesters?: number
+  description?: string
+  is_active?: boolean
+  [key: string]: unknown
+}
+
 type TimeslotOverviewProps = {
   slots: TimeslotRecord[]
   onDelete: (id: number) => Promise<void> | void
@@ -247,8 +258,8 @@ type TimeslotBulkBuilderProps = {
 
 function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) {
   const [startTime, setStartTime] = useState('08:00')
-  const [blocksPerDay, setBlocksPerDay] = useState<number>(8)
-  const [durationMinutes, setDurationMinutes] = useState<number>(60)
+  const [blocksPerDay, setBlocksPerDay] = useState<number>(6)
+  const [durationMinutes, setDurationMinutes] = useState<number>(90)
   const [includeGap, setIncludeGap] = useState(false)
   const [gapMinutes, setGapMinutes] = useState<number>(10)
   const [includeWeekends, setIncludeWeekends] = useState(false)
@@ -695,8 +706,11 @@ function CrudSection({ section }: { section: Section }) {
   const [programSemesters, setProgramSemesters] = useState<any[]>([])
   const [courses, setCourses] = useState<any[]>([])
   const [subjects, setSubjects] = useState<any[]>([])
-  const [selectedProgram, setSelectedProgram] = useState<any | null>(null)
+  const [selectedProgram, setSelectedProgram] = useState<ProgramRecord | null>(null)
   const [showProgramDetail, setShowProgramDetail] = useState(false)
+  const [updatingSemesterId, setUpdatingSemesterId] = useState<number | null>(null)
+  const [updatingProgramId, setUpdatingProgramId] = useState<number | null>(null)
+  const [updatingSemesterStateId, setUpdatingSemesterStateId] = useState<number | null>(null)
   const isMountedRef = useRef(true)
 
   useEffect(() => {
@@ -740,6 +754,27 @@ function CrudSection({ section }: { section: Section }) {
     resolver: zodResolver(schema),
     defaultValues: {},
   })
+
+  const handleToggleProgramStatus = useCallback(async (programId: number, nextIsActive: boolean) => {
+    setUpdatingProgramId(programId)
+    setError(undefined)
+    setSuccess(undefined)
+    try {
+      await api.patch(`/programs/${programId}`, { is_active: nextIsActive })
+      if (!isMountedRef.current) return
+      setItems((prev) => prev.map((item) => (item.id === programId ? { ...item, is_active: nextIsActive } : item)))
+      setSelectedProgram((prev) => (prev && prev.id === programId ? { ...prev, is_active: nextIsActive } : prev))
+      setSuccess(nextIsActive ? 'Programa activado' : 'Programa desactivado')
+    } catch (err: any) {
+      console.error('No se pudo actualizar el programa', err)
+      if (isMountedRef.current) {
+        const detail = err?.response?.data?.detail || err?.message || 'No se pudo actualizar el programa'
+        setError(detail)
+      }
+    } finally {
+      if (isMountedRef.current) setUpdatingProgramId(null)
+    }
+  }, [setError, setItems, setSelectedProgram, setSuccess])
 
   const loadProgramCatalogs = useCallback(async () => {
     if (section.key !== 'programs') {
@@ -843,6 +878,56 @@ function CrudSection({ section }: { section: Section }) {
       cancelled = true
     }
   }, [section.fields, section.key])
+
+  const handleToggleSemesterStatus = useCallback(async (semesterId: number, nextIsActive: boolean) => {
+    setUpdatingSemesterId(semesterId)
+    setError(undefined)
+    setSuccess(undefined)
+    try {
+      await api.patch(`/program-semesters/${semesterId}`, { is_active: nextIsActive })
+      if (!isMountedRef.current) return
+      setProgramSemesters((prev) => prev.map((semester) => (semester.id === semesterId ? { ...semester, is_active: nextIsActive } : semester)))
+      setSuccess(nextIsActive ? 'Semestre activado' : 'Semestre desactivado')
+    } catch (err: any) {
+      console.error('No se pudo actualizar el semestre', err)
+      if (isMountedRef.current) {
+        const detail = err?.response?.data?.detail || err?.message || 'No se pudo actualizar el semestre'
+        setError(detail)
+      }
+    } finally {
+      if (isMountedRef.current) setUpdatingSemesterId(null)
+    }
+  }, [setError, setProgramSemesters, setSuccess])
+
+  const handleChangeSemesterState = useCallback(async (semesterId: number, nextState: 'planned' | 'current' | 'finished') => {
+    setUpdatingSemesterStateId(semesterId)
+    setError(undefined)
+    setSuccess(undefined)
+    try {
+      const response = await api.patch(`/program-semesters/${semesterId}`, { state: nextState })
+      const updatedSemester = response?.data
+      if (!isMountedRef.current) return
+      if (updatedSemester) {
+        setProgramSemesters((prev) => prev.map((semester) => (semester.id === semesterId ? { ...semester, ...updatedSemester } : semester)))
+      }
+      await loadProgramCatalogs()
+      if (!isMountedRef.current) return
+      const successMessage = nextState === 'finished'
+        ? 'Semestre marcado como finalizado'
+        : nextState === 'current'
+          ? 'Semestre marcado como actual'
+          : 'Semestre marcado como planificado'
+      setSuccess(successMessage)
+    } catch (err: any) {
+      console.error('No se pudo actualizar el estado del semestre', err)
+      if (isMountedRef.current) {
+        const detail = err?.response?.data?.detail || err?.message || 'No se pudo actualizar el estado del semestre'
+        setError(detail)
+      }
+    } finally {
+      if (isMountedRef.current) setUpdatingSemesterStateId(null)
+    }
+  }, [loadProgramCatalogs, setError, setProgramSemesters, setSuccess])
 
   const onSubmit = async (values: Record<string, any>) => {
     setError(undefined)
@@ -1142,7 +1227,7 @@ function CrudSection({ section }: { section: Section }) {
                     <Table.Tr>
                       {columns.map((column) => (
                         <Table.Th key={column} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {column}
+                          {section.key === 'programs' && column === 'is_active' ? 'Estado' : column}
                         </Table.Th>
                       ))}
                       <Table.Th style={{ width: 120, whiteSpace: 'nowrap' }}>Acciones</Table.Th>
@@ -1152,6 +1237,26 @@ function CrudSection({ section }: { section: Section }) {
                     {filteredAndSortedItems.map((row) => (
                       <Table.Tr key={row.id ?? `${section.key}-${JSON.stringify(row)}`}>
                         {columns.map((column) => {
+                          if (section.key === 'programs' && column === 'is_active') {
+                            const programId = row.id
+                            const isActive = Boolean(row[column])
+                            return (
+                              <Table.Td key={column}>
+                                <Switch
+                                  checked={isActive}
+                                  onChange={(event) => {
+                                    if (typeof programId !== 'number') return
+                                    void handleToggleProgramStatus(programId, event.currentTarget.checked)
+                                  }}
+                                  disabled={typeof programId !== 'number' || updatingProgramId === programId}
+                                  size="sm"
+                                  color="teal"
+                                  aria-busy={updatingProgramId === programId}
+                                  aria-label={`Cambiar estado del programa ${row.name ?? programId}`}
+                                />
+                              </Table.Td>
+                            )
+                          }
                           const value = row[column]
                           if (value === null || value === undefined) return <Table.Td key={column}>—</Table.Td>
                           if (typeof value === 'object') return <Table.Td key={column}>{labelForOption(value)}</Table.Td>
@@ -1258,11 +1363,38 @@ function CrudSection({ section }: { section: Section }) {
                 {typeof selectedProgram.duration_semesters === 'number' ? (
                   <Badge color="gray" variant="light">Duración {selectedProgram.duration_semesters} semestres</Badge>
                 ) : null}
+                <Badge color={selectedProgram.is_active ? 'teal' : 'gray'} variant="outline">
+                  {selectedProgram.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
               </Group>
               {selectedProgram.description ? (
                 <Text size="sm" c="dimmed">{selectedProgram.description}</Text>
               ) : null}
             </Stack>
+
+            <Paper withBorder radius="md" p="md">
+              <Group justify="space-between" align="center" gap="sm">
+                <div>
+                  <Text fw={600} size="sm">Disponibilidad del programa</Text>
+                  <Text size="xs" c="dimmed">
+                    Controla si este programa aparece en los catálogos y flujos de inscripción.
+                  </Text>
+                </div>
+                <Switch
+                  checked={Boolean(selectedProgram.is_active)}
+                  onChange={(event) => {
+                    void handleToggleProgramStatus(selectedProgram.id, event.currentTarget.checked)
+                  }}
+                  disabled={updatingProgramId === selectedProgram.id}
+                  color="teal"
+                  size="md"
+                  onLabel="Sí"
+                  offLabel="No"
+                  aria-busy={updatingProgramId === selectedProgram.id}
+                  aria-label={`Cambiar estado del programa ${selectedProgram.name}`}
+                />
+              </Group>
+            </Paper>
 
             <Divider label="Semestres asociados" labelPosition="center" />
 
@@ -1310,9 +1442,23 @@ function CrudSection({ section }: { section: Section }) {
                       if (nameA && nameB) return nameA.localeCompare(nameB)
                       return (a?.id ?? 0) > (b?.id ?? 0) ? 1 : -1
                     })
+                    const stateColor = semester.state === 'current' ? 'teal' : semester.state === 'planned' ? 'blue' : 'gray'
+                    const stateLabel = semester.state === 'current' ? 'En curso' : semester.state === 'planned' ? 'Planificado' : 'Finalizado'
+                    const isFinished = semester.state === 'finished'
                     return (
                       <Accordion.Item key={semester.id} value={String(semester.id)}>
-                        <Accordion.Control icon={<Badge color={semester.is_active ? 'teal' : 'gray'} variant="light">{semester.is_active ? 'Activo' : 'Inactivo'}</Badge>}>
+                        <Accordion.Control
+                          icon={(
+                            <Group gap={6} align="center">
+                              <Badge color={semester.is_active ? 'teal' : 'gray'} variant="light">
+                                {semester.is_active ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                              <Badge color={stateColor} variant="light">
+                                {stateLabel}
+                              </Badge>
+                            </Group>
+                          )}
+                        >
                           Semestre {semester.semester_number ?? '—'} · {semester.label || `ID ${semester.id}`}
                         </Accordion.Control>
                         <Accordion.Panel>
@@ -1325,6 +1471,61 @@ function CrudSection({ section }: { section: Section }) {
                                 <Text size="sm" c="dimmed">{semester.description}</Text>
                               ) : null}
                             </Stack>
+                            <Paper withBorder radius="md" p="md">
+                              <Group justify="space-between" align="center" gap="sm">
+                                <div>
+                                  <Text fw={600} size="sm">Disponibilidad</Text>
+                                  <Text size="xs" c="dimmed">
+                                    Activa o desactiva este semestre para que aparezca en los flujos de inscripción y planificación.
+                                  </Text>
+                                </div>
+                                <Switch
+                                  checked={Boolean(semester.is_active)}
+                                  onChange={(event) => {
+                                    void handleToggleSemesterStatus(semester.id, event.currentTarget.checked)
+                                  }}
+                                  disabled={updatingSemesterId === semester.id || updatingSemesterStateId === semester.id || isFinished}
+                                  color="teal"
+                                  size="md"
+                                  onLabel="Sí"
+                                  offLabel="No"
+                                  aria-busy={updatingSemesterId === semester.id || updatingSemesterStateId === semester.id}
+                                  aria-label={`Cambiar estado del semestre ${semester.semester_number ?? semester.id}`}
+                                />
+                              </Group>
+                            </Paper>
+                            <Paper withBorder radius="md" p="md">
+                              <Stack gap="sm">
+                                <div>
+                                  <Text fw={600} size="sm">Estado del ciclo</Text>
+                                  <Text size="xs" c="dimmed">
+                                    Define si el semestre se encuentra planificado, en curso o finalizado para los estudiantes.
+                                  </Text>
+                                </div>
+                                <Group gap="sm" align="center" wrap="wrap">
+                                  <SegmentedControl
+                                    data={[
+                                      { value: 'planned', label: 'Planificado' },
+                                      { value: 'current', label: 'En curso' },
+                                      { value: 'finished', label: 'Finalizado' },
+                                    ]}
+                                    value={semester.state ?? 'planned'}
+                                    onChange={(value) => {
+                                      void handleChangeSemesterState(semester.id, value as 'planned' | 'current' | 'finished')
+                                    }}
+                                    radius="md"
+                                    size="sm"
+                                    disabled={updatingSemesterStateId === semester.id}
+                                  />
+                                  {updatingSemesterStateId === semester.id && <Loader size="sm" color="teal" />}
+                                </Group>
+                                {isFinished ? (
+                                  <Alert color="gray" variant="light" icon={<IconAlertTriangle size={16} />}>
+                                    Los estudiantes no verán este semestre en los listados disponibles, pero conservarán su historial.
+                                  </Alert>
+                                ) : null}
+                              </Stack>
+                            </Paper>
                             <Divider label="Asignaturas vinculadas" labelPosition="center" />
                             {semesterSubjects.length === 0 ? (
                               <Text size="sm" c="dimmed">

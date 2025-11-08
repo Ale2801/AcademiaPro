@@ -12,12 +12,12 @@ router = APIRouter(prefix="/attendance", tags=["attendance"])
 
 
 @router.get("/", response_model=List[Attendance])
-def list_attendance(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_attendance(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	return session.exec(select(Attendance)).all()
 
 
 @router.post("/", response_model=Attendance)
-def create_attendance(att: Attendance, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def create_attendance(att: Attendance, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	if isinstance(att.session_date, str):
 		att.session_date = dt_date.fromisoformat(att.session_date)
 	session.add(att)
@@ -27,7 +27,7 @@ def create_attendance(att: Attendance, session=Depends(get_session), user=Depend
 
 
 @router.get("/{attendance_id}", response_model=Attendance)
-def get_attendance(attendance_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher", "student"))):
+def get_attendance(attendance_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
 	obj = session.get(Attendance, attendance_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Asistencia no encontrada")
@@ -35,7 +35,7 @@ def get_attendance(attendance_id: int, session=Depends(get_session), user=Depend
 
 
 @router.put("/{attendance_id}", response_model=Attendance)
-def update_attendance(attendance_id: int, payload: Attendance, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def update_attendance(attendance_id: int, payload: Attendance, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	obj = session.get(Attendance, attendance_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Asistencia no encontrada")
@@ -51,7 +51,7 @@ def update_attendance(attendance_id: int, payload: Attendance, session=Depends(g
 
 
 @router.delete("/{attendance_id}")
-def delete_attendance(attendance_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_attendance(attendance_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Attendance, attendance_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Asistencia no encontrada")

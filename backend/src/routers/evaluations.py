@@ -11,12 +11,12 @@ router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
 
 @router.get("/", response_model=List[Evaluation])
-def list_evaluations(session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def list_evaluations(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	return session.exec(select(Evaluation)).all()
 
 
 @router.post("/", response_model=Evaluation)
-def create_evaluation(evaluation: Evaluation, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def create_evaluation(evaluation: Evaluation, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	session.add(evaluation)
 	session.commit()
 	session.refresh(evaluation)
@@ -24,7 +24,7 @@ def create_evaluation(evaluation: Evaluation, session=Depends(get_session), user
 
 
 @router.get("/{evaluation_id}", response_model=Evaluation)
-def get_evaluation(evaluation_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "teacher", "student"))):
+def get_evaluation(evaluation_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
 	obj = session.get(Evaluation, evaluation_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Evaluación no encontrada")
@@ -32,7 +32,7 @@ def get_evaluation(evaluation_id: int, session=Depends(get_session), user=Depend
 
 
 @router.put("/{evaluation_id}", response_model=Evaluation)
-def update_evaluation(evaluation_id: int, payload: Evaluation, session=Depends(get_session), user=Depends(require_roles("admin", "teacher"))):
+def update_evaluation(evaluation_id: int, payload: Evaluation, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
 	obj = session.get(Evaluation, evaluation_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Evaluación no encontrada")
@@ -45,7 +45,7 @@ def update_evaluation(evaluation_id: int, payload: Evaluation, session=Depends(g
 
 
 @router.delete("/{evaluation_id}")
-def delete_evaluation(evaluation_id: int, session=Depends(get_session), user=Depends(require_roles("admin"))):
+def delete_evaluation(evaluation_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
 	obj = session.get(Evaluation, evaluation_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Evaluación no encontrada")

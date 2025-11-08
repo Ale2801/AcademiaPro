@@ -57,12 +57,18 @@ class StudentStatusEnum(str, Enum):
     withdrawn = "withdrawn"
 
 
+class ProgramEnrollmentStatusEnum(str, Enum):
+    active = "active"
+    completed = "completed"
+    withdrawn = "withdrawn"
+
+
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
     full_name: str
     hashed_password: str
-    role: str = Field(index=True)  # valores permitidos: admin, teacher, student
+    role: str = Field(index=True)  # valores permitidos: admin, coordinator, teacher, student
     is_active: bool = Field(default=True)
     # Datos personales y de contacto
     phone: Optional[str] = None
@@ -86,6 +92,13 @@ class Program(SQLModel, table=True):
     level: Optional[str] = Field(default=None, description="undergrad/postgrad/secondary/technical")
     duration_semesters: Optional[int] = None
     description: Optional[str] = None
+    is_active: bool = Field(default=True)
+
+
+class ProgramSemesterStateEnum(str, Enum):
+    planned = "planned"
+    current = "current"
+    finished = "finished"
 
 
 class ProgramSemester(SQLModel, table=True):
@@ -95,6 +108,7 @@ class ProgramSemester(SQLModel, table=True):
     label: Optional[str] = Field(default=None, description="Etiqueta legible del semestre")
     description: Optional[str] = None
     is_active: bool = Field(default=True)
+    state: ProgramSemesterStateEnum = Field(default=ProgramSemesterStateEnum.planned, index=True)
 
 
 class Student(SQLModel, table=True):
@@ -114,6 +128,15 @@ class Student(SQLModel, table=True):
     current_term: Optional[str] = None
     guardian_name: Optional[str] = None
     guardian_phone: Optional[str] = None
+
+
+class StudentProgramEnrollment(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    student_id: int = Field(foreign_key="student.id", index=True)
+    program_semester_id: int = Field(foreign_key="programsemester.id", index=True)
+    enrolled_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    status: ProgramEnrollmentStatusEnum = Field(default=ProgramEnrollmentStatusEnum.active, index=True)
+    ended_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
 
 
 class Teacher(SQLModel, table=True):
@@ -237,3 +260,13 @@ class AppSetting(SQLModel, table=True):
     description: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
     category: Optional[str] = Field(default=None, index=True, sa_column_kwargs={"nullable": True})
     is_public: bool = Field(default=False)
+
+
+class ScheduleSupportRequest(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    student_id: int = Field(foreign_key="student.id", index=True)
+    subject_id: Optional[int] = Field(default=None, foreign_key="subject.id")
+    message: str = Field(description="Solicitud generada por capacidad completa")
+    preferred_course_ids: Optional[str] = Field(default=None, description="Lista JSON de cursos deseados")
+    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    handled: bool = Field(default=False, description="Indica si la administración respondió")
