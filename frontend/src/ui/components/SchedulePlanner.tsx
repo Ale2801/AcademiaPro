@@ -1,29 +1,41 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
   Button,
   Card,
+  Center,
+  Checkbox,
+  CloseButton,
+  Divider,
   Group,
   Loader,
   Modal,
   MultiSelect,
   NumberInput,
+  Popover,
+  ScrollArea,
+  SegmentedControl,
   Select,
   SelectProps,
   SimpleGrid,
+  Spoiler,
   Stack,
-  Switch,
+  Table,
+  Tabs,
   Text,
+  TextInput,
   Title,
+  Tooltip,
   useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
 import {
   IconCalendarCog,
-  IconDeviceFloppy,
   IconCheck,
+  IconDeviceFloppy,
   IconRefresh,
   IconRun,
   IconUsersGroup,
@@ -230,14 +242,7 @@ export default function SchedulePlanner() {
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
   const [globalSchedule, setGlobalSchedule] = useState<ScheduleEntry[]>([])
 
-  const [requireBreaks, setRequireBreaks] = useState(true)
-  const [maxConsecutiveBlocks, setMaxConsecutiveBlocks] = useState(3)
-  
-  // Nuevas opciones del optimizador
-  const [enableLunchBlocks, setEnableLunchBlocks] = useState(false)
-  const [minGapMinutes, setMinGapMinutes] = useState(15)
   const [maxDailyHours, setMaxDailyHours] = useState(6)
-  const [balanceWeight, setBalanceWeight] = useState(0.3)
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
 
   const [selectedCourseForStudents, setSelectedCourseForStudents] = useState<string | null>(null)
@@ -1013,29 +1018,13 @@ export default function SchedulePlanner() {
         }
       }
 
-      // Generar lunch_blocks si está habilitado (Lun-Vie 12:00-14:00)
-      const lunchBlocks: [number, number][] | undefined = enableLunchBlocks
-        ? [
-            [0, 12], [0, 13], // Lunes
-            [1, 12], [1, 13], // Martes
-            [2, 12], [2, 13], // Miércoles
-            [3, 12], [3, 13], // Jueves
-            [4, 12], [4, 13], // Viernes
-          ]
-        : undefined
-
       const payload = {
         courses: coursesPayload,
         rooms: roomsPayload,
         timeslots: timeslotPayload,
         constraints: {
           teacher_availability: availability,
-          max_consecutive_blocks: maxConsecutiveBlocks,
-          min_gap_blocks: requireBreaks ? 1 : 0,
-          min_gap_minutes: minGapMinutes,
           max_daily_hours_per_program: maxDailyHours,
-          balance_weight: balanceWeight,
-          lunch_blocks: lunchBlocks,
         },
       }
 
@@ -1103,7 +1092,7 @@ export default function SchedulePlanner() {
     } finally {
       setOptimizerLoading(false)
     }
-  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxConsecutiveBlocks, requireBreaks, enableLunchBlocks, minGapMinutes, maxDailyHours, balanceWeight, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
+  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxDailyHours, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
 
   const handleApplyOptimized = useCallback(async () => {
     if (optimizerAssignments.length === 0) return
@@ -1716,62 +1705,19 @@ export default function SchedulePlanner() {
             </div>
           </Group>
           
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-            <NumberInput
-              label="Bloques consecutivos máx."
-              description="Máximo de clases seguidas sin descanso"
-              value={maxConsecutiveBlocks}
-              min={1}
-              max={6}
-              onChange={(value) => setMaxConsecutiveBlocks(Number(value) || 1)}
-            />
-            <NumberInput
-              label="Minutos de recreo"
-              description="Tiempo mínimo entre clases"
-              value={minGapMinutes}
-              min={0}
-              max={60}
-              step={5}
-              onChange={(value) => setMinGapMinutes(Number(value) || 0)}
-            />
-            <NumberInput
-              label="Horas máx. por día"
-              description="Límite diario por programa"
-              value={maxDailyHours}
-              min={1}
-              max={12}
-              onChange={(value) => setMaxDailyHours(Number(value) || 6)}
-            />
-          </SimpleGrid>
+          <Text size="sm" c="dimmed">
+            Los descansos se definen ahora al generar los bloques horarios. Ajusta allí los recreos, pausas extendidas o ventanas de almuerzo y el optimizador respetará esa estructura.
+          </Text>
 
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-            <Switch
-              label="Exigir pausas entre clases del mismo docente"
-              description="Requiere al menos 1 bloque de separación"
-              checked={requireBreaks}
-              onChange={(event) => setRequireBreaks(event.currentTarget.checked)}
-            />
-            <Switch
-              label="Respetar horario de almuerzo (12:00-14:00)"
-              description="No programa clases durante almuerzo Lun-Vie"
-              checked={enableLunchBlocks}
-              onChange={(event) => setEnableLunchBlocks(event.currentTarget.checked)}
-            />
-          </SimpleGrid>
-
-          {enableLunchBlocks && (
-            <NumberInput
-              label="Peso de balanceo (0-1)"
-              description="Mayor valor = mejor distribución en la semana"
-              value={balanceWeight}
-              min={0}
-              max={1}
-              step={0.1}
-              decimalScale={1}
-              onChange={(value) => setBalanceWeight(Number(value) || 0.3)}
-              maw={250}
-            />
-          )}
+          <NumberInput
+            label="Horas máx. por día"
+            description="Límite diario por programa"
+            value={maxDailyHours}
+            min={1}
+            max={12}
+            onChange={(value) => setMaxDailyHours(Number(value) || 6)}
+            maw={220}
+          />
 
           <Group gap="sm">
             <Button leftSection={<IconRun size={18} />} loading={optimizerLoading} onClick={() => runOptimizer()}>

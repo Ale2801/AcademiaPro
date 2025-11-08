@@ -123,8 +123,8 @@ describe('GlobalScheduleOptimizer', () => {
     const runButton = await screen.findByRole('button', { name: /Optimizar horarios globales/i })
     expect(runButton).toBeEnabled()
 
-    const consecutiveInput = screen.getByLabelText('Bloques consecutivos máximos') as HTMLInputElement
-    fireEvent.change(consecutiveInput, { target: { value: '3' } })
+  const dailyLimitInput = screen.getByLabelText('Horas máximas por programa al día') as HTMLInputElement
+  fireEvent.change(dailyLimitInput, { target: { value: '8' } })
 
     fireEvent.click(runButton)
 
@@ -137,8 +137,11 @@ describe('GlobalScheduleOptimizer', () => {
       weekly_hours: sampleCourse.weekly_hours,
       program_semester_id: sampleSemester.id,
     })
-    expect(payload.constraints.max_consecutive_blocks).toBe(3)
-    expect(payload.constraints.min_gap_blocks).toBe(1)
+    expect(payload.constraints.max_daily_hours_per_program).toBe(8)
+    expect(payload.constraints).not.toHaveProperty('max_consecutive_blocks')
+    expect(payload.constraints).not.toHaveProperty('min_gap_blocks')
+    expect(payload.constraints).not.toHaveProperty('min_gap_minutes')
+    expect(payload.constraints).not.toHaveProperty('lunch_blocks')
     expect(payload.constraints.teacher_availability[sampleTeacher.id]).toEqual([sampleTimeslot.id])
 
     expect(await screen.findByRole('heading', { name: 'Ingeniería' })).toBeInTheDocument()

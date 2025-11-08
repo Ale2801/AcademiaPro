@@ -262,6 +262,12 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
   const [durationMinutes, setDurationMinutes] = useState<number>(90)
   const [includeGap, setIncludeGap] = useState(false)
   const [gapMinutes, setGapMinutes] = useState<number>(10)
+  const [longBreakEnabled, setLongBreakEnabled] = useState(false)
+  const [longBreakEvery, setLongBreakEvery] = useState<number>(3)
+  const [longBreakMinutes, setLongBreakMinutes] = useState<number>(15)
+  const [lunchEnabled, setLunchEnabled] = useState(false)
+  const [lunchStart, setLunchStart] = useState('13:00')
+  const [lunchDurationMinutes, setLunchDurationMinutes] = useState<number>(60)
   const [includeWeekends, setIncludeWeekends] = useState(false)
   const [replaceExisting, setReplaceExisting] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -293,9 +299,20 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
     if (startMinutes == null) return 'Ingresa una hora de inicio válida (HH:MM).'
     if (!Number.isFinite(normalizedDuration) || normalizedDuration <= 0) return 'La duración debe ser mayor a 0 minutos.'
     if (!Number.isFinite(normalizedBlocks) || normalizedBlocks <= 0) return 'Define cuántos bloques habrá por día.'
-    if (includeGap && (!Number.isFinite(gapMinutes) || gapMinutes < 0)) return 'El espacio entre bloques no puede ser negativo.'
+    if (includeGap && (!Number.isFinite(gapMinutes) || gapMinutes < 0)) return 'El descanso corto no puede ser negativo.'
+    if (longBreakEnabled) {
+      if (!Number.isFinite(longBreakEvery) || longBreakEvery <= 0) return 'Configura cada cuántos bloques aplicar el descanso extendido.'
+      if (!Number.isFinite(longBreakMinutes) || longBreakMinutes <= 0) return 'La duración del descanso extendido debe ser mayor a 0 minutos.'
+    }
+    if (lunchEnabled) {
+      const parsedLunchStart = parseTimeString(lunchStart)
+      if (parsedLunchStart == null) return 'Ingresa una hora válida para el almuerzo (HH:MM).'
+      if (!Number.isFinite(lunchDurationMinutes) || lunchDurationMinutes <= 0) return 'La duración del almuerzo debe ser mayor a 0 minutos.'
+      if (parsedLunchStart < startMinutes) return 'La hora de almuerzo debe ser posterior al inicio de la jornada.'
+      if (parsedLunchStart + lunchDurationMinutes > 24 * 60) return 'El almuerzo debe finalizar antes de medianoche.'
+    }
     return null
-  }, [gapMinutes, includeGap, normalizedBlocks, normalizedDuration, startMinutes])
+  }, [gapMinutes, includeGap, longBreakEnabled, longBreakEvery, longBreakMinutes, lunchDurationMinutes, lunchEnabled, lunchStart, normalizedBlocks, normalizedDuration, startMinutes])
 
   const dayIndexes = useMemo(() => (includeWeekends ? [0, 1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4]), [includeWeekends])
 
@@ -306,22 +323,64 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
     if (startMinutes == null || normalizedDuration <= 0 || normalizedBlocks <= 0) {
       return { overflow: false, days: [] as { day: number; label: string; slots: { start: string; end: string; exists: boolean }[] }[] }
     }
+
+    const longBreakEveryNormalized = longBreakEnabled ? Math.max(1, Math.floor(longBreakEvery)) : 0
+    const longBreakMinutesNormalized = longBreakEnabled ? Math.max(0, Math.round(longBreakMinutes)) : 0
+    const lunchStartMinutes = lunchEnabled ? parseTimeString(lunchStart) : null
+    const lunchDuration = lunchEnabled ? Math.max(0, Math.round(lunchDurationMinutes)) : 0
+    const lunchEndMinutes = lunchStartMinutes != null ? lunchStartMinutes + lunchDuration : null
+
     let overflow = false
     const days = dayIndexes.map((day) => {
       const slots: { start: string; end: string; exists: boolean }[] = []
+      let currentStart = startMinutes
+      let consecutiveCounter = 0
+
       for (let index = 0; index < normalizedBlocks; index += 1) {
-        const offset = index * (normalizedDuration + normalizedGap)
-        const slotStart = startMinutes + offset
+        if (currentStart >= 24 * 60) {
+          overflow = true
+          break
+        }
+
+        let slotStart = currentStart
+        if (lunchStartMinutes != null && lunchEndMinutes != null) {
+          if (slotStart < lunchEndMinutes && slotStart + normalizedDuration > lunchStartMinutes) {
+            slotStart = Math.max(slotStart, lunchEndMinutes)
+          }
+          if (slotStart >= lunchStartMinutes && slotStart < lunchEndMinutes) {
+            slotStart = lunchEndMinutes
+          }
+        }
+
         const slotEnd = slotStart + normalizedDuration
         if (slotEnd > 24 * 60) {
           overflow = true
           break
         }
+
         const startLabel = minutesToTimeLabel(slotStart)
         const endLabel = minutesToTimeLabel(slotEnd)
         const exists = existingKeys.has(`${day}-${startLabel}-${endLabel}`)
         slots.push({ start: startLabel, end: endLabel, exists })
+
+        let nextStart = slotEnd
+        if (includeGap && normalizedGap > 0) {
+          nextStart += normalizedGap
+        }
+
+        consecutiveCounter += 1
+        if (longBreakEveryNormalized > 0 && longBreakMinutesNormalized > 0 && consecutiveCounter >= longBreakEveryNormalized && index < normalizedBlocks - 1) {
+          nextStart += longBreakMinutesNormalized
+          consecutiveCounter = 0
+        }
+
+        if (lunchStartMinutes != null && lunchEndMinutes != null && nextStart >= lunchStartMinutes && nextStart < lunchEndMinutes) {
+          nextStart = lunchEndMinutes
+        }
+
+        currentStart = nextStart
       }
+
       return {
         day,
         label: WEEKDAY_LABELS[day] ?? `Día ${day}`,
@@ -329,7 +388,7 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
       }
     })
     return { overflow, days }
-  }, [dayIndexes, existingKeys, normalizedBlocks, normalizedDuration, normalizedGap, startMinutes, validationError])
+  }, [dayIndexes, existingKeys, includeGap, longBreakEnabled, longBreakEvery, longBreakMinutes, lunchDurationMinutes, lunchEnabled, lunchStart, normalizedBlocks, normalizedDuration, normalizedGap, startMinutes, validationError])
 
   const totalBlocks = useMemo(() => preview.days.reduce((acc, day) => acc + day.slots.length, 0), [preview.days])
   const duplicateBlocks = useMemo(() => preview.days.reduce((acc, day) => acc + day.slots.filter((slot) => slot.exists).length, 0), [preview.days])
@@ -404,11 +463,25 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
     const base = includeWeekends
       ? 'Se configurarán bloques de lunes a domingo.'
       : 'Se configurarán bloques de lunes a viernes.'
-    if (replaceExisting && existing.length > 0) {
-      return `${base} Esta recreación eliminará ${existing.length} bloque${existing.length === 1 ? '' : 's'} actual${existing.length === 1 ? '' : 'es'} y los horarios que dependan de ellos.`
+
+    const restHighlights: string[] = []
+    if (includeGap && normalizedGap > 0) {
+      restHighlights.push(`descansos cortos de ${normalizedGap} minuto${normalizedGap === 1 ? '' : 's'}`)
     }
-    return base
-  }, [existing.length, includeWeekends, preview.days.length, replaceExisting, validationError])
+    if (longBreakEnabled && longBreakMinutes > 0) {
+      restHighlights.push(`pausas extendidas cada ${longBreakEvery} bloque${longBreakEvery === 1 ? '' : 's'} (${longBreakMinutes} min)`)
+    }
+    if (lunchEnabled) {
+      restHighlights.push(`ventana de almuerzo desde ${lunchStart} por ${lunchDurationMinutes} minuto${lunchDurationMinutes === 1 ? '' : 's'}`)
+    }
+
+    const restSummary = restHighlights.length > 0 ? ` Configuración de descansos: ${restHighlights.join(' · ')}.` : ''
+
+    if (replaceExisting && existing.length > 0) {
+      return `${base}${restSummary} Esta recreación eliminará ${existing.length} bloque${existing.length === 1 ? '' : 's'} actual${existing.length === 1 ? '' : 'es'} y los horarios que dependan de ellos.`
+    }
+    return `${base}${restSummary}`
+  }, [existing.length, includeGap, includeWeekends, longBreakEnabled, longBreakEvery, longBreakMinutes, lunchDurationMinutes, lunchEnabled, lunchStart, normalizedGap, preview.days.length, replaceExisting, validationError])
 
   const allExisting = !replaceExisting && !validationError && !preview.overflow && totalBlocks > 0 && newBlocks === 0
 
@@ -488,38 +561,107 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
           />
         </SimpleGrid>
 
-        <Group gap="md" align="flex-end" wrap="wrap">
-          <Switch
-            label="Espacio entre bloques"
-            description="Inserta recreos entre clases"
-            checked={includeGap}
-            onChange={(event) => setIncludeGap(event.currentTarget.checked)}
-            aria-label="Espacio entre bloques"
-          />
-          <NumberInput
-            label="Minutos de descanso"
-            min={0}
-            step={5}
-            disabled={!includeGap}
-            value={gapMinutes}
-            onChange={(value) => setGapMinutes(typeof value === 'number' ? value : Number(value) || 0)}
-          />
-          <Switch
-            label="Incluir fines de semana"
-            description="Agrega sábado y domingo"
-            checked={includeWeekends}
-            onChange={(event) => setIncludeWeekends(event.currentTarget.checked)}
-            aria-label="Incluir fines de semana"
-          />
-          <Switch
-            label="Reemplazar bloques existentes"
-            description="Borra la jornada actual y recrea todos los bloques"
-            checked={replaceExisting}
-            color="red"
-            onChange={(event) => setReplaceExisting(event.currentTarget.checked)}
-            aria-label="Reemplazar bloques existentes"
-          />
-        </Group>
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <Stack gap="xs">
+            <Switch
+              label="Descanso corto entre bloques"
+              description="Inserta recreos automáticos"
+              checked={includeGap}
+              onChange={(event) => setIncludeGap(event.currentTarget.checked)}
+              aria-label="Descanso corto entre bloques"
+            />
+            <NumberInput
+              label="Duración descanso corto (min)"
+              min={0}
+              step={5}
+              disabled={!includeGap}
+              value={gapMinutes}
+              onChange={(value) => setGapMinutes(typeof value === 'number' ? value : Number(value) || 0)}
+            />
+          </Stack>
+
+          <Stack gap="xs">
+            <Switch
+              label="Descanso extendido programado"
+              description="Agrega una pausa larga recurrente"
+              checked={longBreakEnabled}
+              onChange={(event) => setLongBreakEnabled(event.currentTarget.checked)}
+              aria-label="Descanso extendido programado"
+            />
+            <Group gap="sm" align="flex-end" grow>
+              <NumberInput
+                label="Cada N bloques"
+                min={1}
+                max={12}
+                disabled={!longBreakEnabled}
+                value={longBreakEvery}
+                onChange={(value) => {
+                  const parsed = typeof value === 'number' ? value : Number(value)
+                  setLongBreakEvery(!Number.isFinite(parsed) || parsed <= 0 ? 1 : Math.floor(parsed))
+                }}
+              />
+              <NumberInput
+                label="Duración descanso largo (min)"
+                min={5}
+                step={5}
+                disabled={!longBreakEnabled}
+                value={longBreakMinutes}
+                onChange={(value) => {
+                  const parsed = typeof value === 'number' ? value : Number(value)
+                  setLongBreakMinutes(!Number.isFinite(parsed) || parsed <= 0 ? 15 : parsed)
+                }}
+              />
+            </Group>
+          </Stack>
+
+          <Stack gap="xs">
+            <Switch
+              label="Definir pausa de almuerzo"
+              description="Bloquea una ventana diaria"
+              checked={lunchEnabled}
+              onChange={(event) => setLunchEnabled(event.currentTarget.checked)}
+              aria-label="Definir pausa de almuerzo"
+            />
+            <Group gap="sm" align="flex-end" grow>
+              <TextInput
+                label="Inicio almuerzo (HH:MM)"
+                placeholder="13:00"
+                disabled={!lunchEnabled}
+                value={lunchStart}
+                onChange={(event) => setLunchStart(event.currentTarget.value)}
+              />
+              <NumberInput
+                label="Duración almuerzo (min)"
+                min={5}
+                step={5}
+                disabled={!lunchEnabled}
+                value={lunchDurationMinutes}
+                onChange={(value) => {
+                  const parsed = typeof value === 'number' ? value : Number(value)
+                  setLunchDurationMinutes(!Number.isFinite(parsed) || parsed <= 0 ? 60 : parsed)
+                }}
+              />
+            </Group>
+          </Stack>
+
+          <Stack gap="xs">
+            <Switch
+              label="Incluir fines de semana"
+              description="Agrega sábado y domingo"
+              checked={includeWeekends}
+              onChange={(event) => setIncludeWeekends(event.currentTarget.checked)}
+              aria-label="Incluir fines de semana"
+            />
+            <Switch
+              label="Reemplazar bloques existentes"
+              description="Borra la jornada actual y recrea todos los bloques"
+              checked={replaceExisting}
+              color="red"
+              onChange={(event) => setReplaceExisting(event.currentTarget.checked)}
+              aria-label="Reemplazar bloques existentes"
+            />
+          </Stack>
+        </SimpleGrid>
 
         {infoSummary && (
           <Text size="sm" c="dimmed">
@@ -573,8 +715,14 @@ function TimeslotBulkBuilder({ existing, onCreated }: TimeslotBulkBuilderProps) 
                 setStartTime('08:00')
                 setBlocksPerDay(6)
                 setDurationMinutes(90)
-                setGapMinutes(10)
                 setIncludeGap(false)
+                setGapMinutes(10)
+                setLongBreakEnabled(false)
+                setLongBreakEvery(3)
+                setLongBreakMinutes(15)
+                setLunchEnabled(false)
+                setLunchStart('13:00')
+                setLunchDurationMinutes(60)
                 setIncludeWeekends(false)
                 setReplaceExisting(false)
                 setFeedback(null)

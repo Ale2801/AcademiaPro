@@ -13,7 +13,6 @@ import {
   NumberInput,
   SimpleGrid,
   Stack,
-  Switch,
   Text,
   Title,
 } from '@mantine/core'
@@ -31,19 +30,6 @@ import {
 } from '@tabler/icons-react'
 import { api } from '../../lib/api'
 import ScheduleTimeline, { ScheduleEntry } from './ScheduleTimeline'
-
-const DEFAULT_LUNCH_BLOCKS: [number, number][] = [
-  [0, 12],
-  [0, 13],
-  [1, 12],
-  [1, 13],
-  [2, 12],
-  [2, 13],
-  [3, 12],
-  [3, 13],
-  [4, 12],
-  [4, 13],
-]
 
 function timeStringToMinutes(value?: string | null): number | null {
   if (!value) return null
@@ -224,12 +210,7 @@ export default function GlobalScheduleOptimizer() {
   const [unassigned, setUnassigned] = useState<OptimizerUnassigned[]>([])
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
 
-  const [requireBreaks, setRequireBreaks] = useState(true)
-  const [enableLunchBlocks, setEnableLunchBlocks] = useState(true)
-  const [maxConsecutiveBlocks, setMaxConsecutiveBlocks] = useState(4)
-  const [minGapMinutes, setMinGapMinutes] = useState(15)
   const [maxDailyHours, setMaxDailyHours] = useState(6)
-  const [balanceWeight, setBalanceWeight] = useState(0.3)
   const [saving, setSaving] = useState(false)
 
   const loadCatalogs = useCallback(async () => {
@@ -458,20 +439,13 @@ export default function GlobalScheduleOptimizer() {
         }
       }
 
-      const lunchBlocks = enableLunchBlocks ? DEFAULT_LUNCH_BLOCKS : undefined
-
       const payload = {
         courses: coursesPayload,
         rooms: roomsPayload,
         timeslots: timeslotPayload,
         constraints: {
           teacher_availability: teacherAvailability,
-          max_consecutive_blocks: maxConsecutiveBlocks,
-          min_gap_blocks: requireBreaks ? 1 : 0,
-          min_gap_minutes: minGapMinutes,
           max_daily_hours_per_program: maxDailyHours,
-          balance_weight: balanceWeight,
-          lunch_blocks: lunchBlocks,
         },
       }
 
@@ -543,16 +517,11 @@ export default function GlobalScheduleOptimizer() {
     }
   }, [
     allTimeslotIds,
-    balanceWeight,
     buildTimeslotBlocks,
     courseMap,
-    enableLunchBlocks,
     filteredCourses,
-    maxConsecutiveBlocks,
     maxDailyHours,
-    minGapMinutes,
     programMap,
-    requireBreaks,
     roomMap,
     rooms,
     semesterMap,
@@ -801,57 +770,21 @@ export default function GlobalScheduleOptimizer() {
           <Group justify="space-between" align="center">
             <Text fw={600}>Restricciones del optimizador</Text>
             <Text size="xs" c="dimmed">
-              Ajusta las reglas que se enviarán al motor de optimización
+              Ajusta los límites generales antes de optimizar
             </Text>
           </Group>
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-            <NumberInput
-              label="Bloques consecutivos máximos"
-              min={1}
-              max={8}
-              value={maxConsecutiveBlocks}
-              onChange={(value) => setMaxConsecutiveBlocks(typeof value === 'number' ? value : 1)}
-              disabled={loading}
-            />
-            <NumberInput
-              label="Minutos mínimos entre bloques"
-              min={0}
-              value={minGapMinutes}
-              onChange={(value) => setMinGapMinutes(typeof value === 'number' ? value : 0)}
-              disabled={loading}
-            />
-            <NumberInput
-              label="Horas máximas por programa al día"
-              min={1}
-              max={12}
-              value={maxDailyHours}
-              onChange={(value) => setMaxDailyHours(typeof value === 'number' ? value : 6)}
-              disabled={loading}
-            />
-            <NumberInput
-              label="Peso de balance global"
-              min={0}
-              max={1}
-              step={0.1}
-              value={balanceWeight}
-              onChange={(value) => setBalanceWeight(typeof value === 'number' ? value : 0.3)}
-              disabled={loading}
-            />
-          </SimpleGrid>
-          <Group gap="lg">
-            <Switch
-              label="Exigir descansos entre bloques consecutivos"
-              checked={requireBreaks}
-              onChange={(event) => setRequireBreaks(event.currentTarget.checked)}
-              disabled={loading}
-            />
-            <Switch
-              label="Reservar bloque de almuerzo (12:00-14:00)"
-              checked={enableLunchBlocks}
-              onChange={(event) => setEnableLunchBlocks(event.currentTarget.checked)}
-              disabled={loading}
-            />
-          </Group>
+          <Text size="sm" c="dimmed">
+            Los descansos, recreos y ventanas de almuerzo se configuran ahora al generar los bloques horarios. El optimizador respetará esa estructura de forma automática.
+          </Text>
+          <NumberInput
+            label="Horas máximas por programa al día"
+            min={1}
+            max={12}
+            value={maxDailyHours}
+            onChange={(value) => setMaxDailyHours(typeof value === 'number' ? value : 6)}
+            disabled={loading}
+            maw={260}
+          />
         </Stack>
       </Card>
 
