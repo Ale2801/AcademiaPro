@@ -9,8 +9,10 @@ import Landing from './ui/Landing'
 import { App } from './ui/App'
 import AdminDashboard from './ui/dashboards/AdminDashboard'
 import AdminSettingsDashboard from './ui/dashboards/AdminSettingsDashboard'
+import CoordinatorDashboard from './ui/dashboards/CoordinatorDashboard'
 import TeacherDashboard from './ui/dashboards/TeacherDashboard'
 import StudentDashboard from './ui/dashboards/StudentDashboard'
+import StudentMatriculationDashboard from './ui/dashboards/StudentMatriculationDashboard'
 
 const theme = createTheme({
 	primaryColor: 'indigo',
@@ -38,8 +40,10 @@ const router = createBrowserRouter([
 	{ path: '/app', element: <App /> },
 	{ path: '/dashboard/admin', element: <AdminDashboard /> },
 	{ path: '/dashboard/admin/settings', element: <AdminSettingsDashboard /> },
+	{ path: '/dashboard/coordinator', element: <CoordinatorDashboard /> },
 	{ path: '/dashboard/teacher', element: <TeacherDashboard /> },
 	{ path: '/dashboard/student', element: <StudentDashboard /> },
+	{ path: '/dashboard/student/matricula', element: <StudentMatriculationDashboard /> },
 ])
 
 const root = createRoot(document.getElementById('root')!)

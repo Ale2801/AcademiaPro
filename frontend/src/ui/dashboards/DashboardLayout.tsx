@@ -10,6 +10,8 @@ import {
   IconNotebook,
   IconCalendarStats,
   IconUserCheck,
+  IconClipboardList,
+  IconUsersGroup,
   IconSettings,
   IconMoon,
   IconSun,
@@ -55,24 +57,68 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
     } catch {}
   }
   const isAuthenticated = Boolean(authToken || storedToken || tokenFromStorage)
-  const navItems = useMemo(() => ([
-    {
-      label: 'Inicio',
-      to: '/dashboard/admin',
-      icon: IconLayoutDashboard,
-      matcher: (path: string) => path === '/dashboard/admin',
-    },
-    { label: 'Cursos', to: '/dashboard/admin#cursos', icon: IconChalkboard },
-    { label: 'Evaluaciones', to: '/dashboard/admin#evaluaciones', icon: IconNotebook },
-    { label: 'Horario', to: '/dashboard/admin#horario', icon: IconCalendarStats },
-    { label: 'Asistencia', to: '/dashboard/admin#asistencia', icon: IconUserCheck },
-    {
-      label: 'Ajustes',
-      to: '/dashboard/admin/settings',
-      icon: IconSettings,
-      matcher: (path: string) => path.startsWith('/dashboard/admin/settings'),
-    },
-  ]), [])
+  const navItems = useMemo(() => {
+    const config = {
+      admin: [
+        {
+          label: 'Inicio',
+          to: '/dashboard/admin',
+          icon: IconLayoutDashboard,
+          matcher: (path: string) => path === '/dashboard/admin',
+        },
+        { label: 'Cursos', to: '/dashboard/admin#cursos', icon: IconChalkboard },
+        { label: 'Evaluaciones', to: '/dashboard/admin#evaluaciones', icon: IconNotebook },
+        { label: 'Horario', to: '/dashboard/admin#horario', icon: IconCalendarStats },
+        { label: 'Asistencia', to: '/dashboard/admin#asistencia', icon: IconUserCheck },
+        {
+          label: 'Ajustes',
+          to: '/dashboard/admin/settings',
+          icon: IconSettings,
+          matcher: (path: string) => path.startsWith('/dashboard/admin/settings'),
+        },
+      ],
+      coordinator: [
+        {
+          label: 'Resumen',
+          to: '/dashboard/coordinator',
+          icon: IconLayoutDashboard,
+          matcher: (path: string) => path === '/dashboard/coordinator',
+        },
+        { label: 'Programas', to: '/dashboard/coordinator#programas', icon: IconChalkboard },
+        { label: 'Planeación', to: '/dashboard/coordinator#planeacion', icon: IconClipboardList },
+        { label: 'Horarios', to: '/dashboard/coordinator#horarios', icon: IconCalendarStats },
+        { label: 'Docentes', to: '/dashboard/coordinator#docentes', icon: IconUsersGroup },
+      ],
+      teacher: [
+        {
+          label: 'Inicio',
+          to: '/dashboard/teacher',
+          icon: IconLayoutDashboard,
+          matcher: (path: string) => path === '/dashboard/teacher',
+        },
+        { label: 'Mis cursos', to: '/dashboard/teacher#cursos', icon: IconChalkboard },
+        { label: 'Mi horario', to: '/dashboard/teacher#horario', icon: IconCalendarStats },
+      ],
+      student: [
+        {
+          label: 'Inicio',
+          to: '/dashboard/student',
+          icon: IconLayoutDashboard,
+          matcher: (path: string) => path === '/dashboard/student',
+        },
+        {
+          label: 'Matrícula',
+          to: '/dashboard/student/matricula',
+          icon: IconUserCheck,
+          matcher: (path: string) => path.startsWith('/dashboard/student/matricula'),
+        },
+        { label: 'Mis cursos', to: '/dashboard/student#cursos', icon: IconNotebook },
+        { label: 'Horario', to: '/dashboard/student#horario', icon: IconCalendarStats },
+      ],
+    }
+    const role = (user.role || 'admin') as keyof typeof config
+    return config[role] ?? config.admin
+  }, [user.role])
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setDragStartX(e.clientX)
