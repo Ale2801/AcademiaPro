@@ -5,6 +5,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Course, ProgramSemester
 from ..security import require_roles
+from ..utils.sqlmodel_helpers import apply_partial_update
 
 
 router = APIRouter(prefix="/courses", tags=["courses"]) 
@@ -51,8 +52,7 @@ def update_course(course_id: int, payload: Course, session=Depends(get_session),
         semester = session.get(ProgramSemester, data["program_semester_id"])
         if not semester:
             raise HTTPException(status_code=404, detail="Semestre de programa no encontrado")
-    for k, v in data.items():
-        setattr(obj, k, v)
+    apply_partial_update(obj, data)
     session.add(obj)
     session.commit()
     session.refresh(obj)

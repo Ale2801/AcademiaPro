@@ -1,11 +1,17 @@
 /// <reference types="vitest/globals" />
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { vi } from 'vitest'
 import { Admin } from './Admin'
 import { MantineProvider } from '@mantine/core'
 function renderWithMantine(ui: React.ReactNode) {
-  return render(<MantineProvider>{ui}</MantineProvider>)
+  return render(
+    <MemoryRouter>
+      <MantineProvider>{ui}</MantineProvider>
+    </MemoryRouter>,
+  )
 }
 
 const apiModule = vi.hoisted(() => {
@@ -13,6 +19,7 @@ const apiModule = vi.hoisted(() => {
     get: vi.fn(() => Promise.resolve({ data: [] })),
     post: vi.fn(() => Promise.resolve({ data: {} })),
     delete: vi.fn(() => Promise.resolve({ data: {} })),
+    patch: vi.fn(() => Promise.resolve({ data: {} })),
   }
 })
 
@@ -21,6 +28,7 @@ vi.mock('../lib/api', () => ({
     get: apiModule.get,
     post: apiModule.post,
     delete: apiModule.delete,
+    patch: apiModule.patch,
     defaults: { headers: { common: {} } },
   },
 }))
@@ -29,9 +37,11 @@ function resetApiMocks() {
   apiModule.get.mockReset()
   apiModule.post.mockReset()
   apiModule.delete.mockReset()
+  apiModule.patch.mockReset()
   apiModule.get.mockImplementation(() => Promise.resolve({ data: [] }))
   apiModule.post.mockImplementation(() => Promise.resolve({ data: {} }))
   apiModule.delete.mockImplementation(() => Promise.resolve({ data: {} }))
+  apiModule.patch.mockImplementation(() => Promise.resolve({ data: {} }))
 }
 
 beforeEach(() => {
@@ -54,11 +64,17 @@ describe('Admin CRUD básico', () => {
     ;(api.post as any).mockResolvedValueOnce({ data: { id: 1 } })
     ;(api.get as any).mockResolvedValueOnce({ data: [{ id: 1, day_of_week: 1, start_time: '08:00:00', end_time: '09:00:00' }] })
 
-    const day = screen.getByLabelText('Día (0-6)') as HTMLInputElement
+  const [dayInput] = screen.getAllByLabelText('Día (0-6)') as HTMLInputElement[]
     const start = screen.getByLabelText('Hora inicio') as HTMLInputElement
     const end = screen.getByLabelText('Hora fin') as HTMLInputElement
 
-    fireEvent.change(day, { target: { value: '1' } })
+    fireEvent.mouseDown(dayInput)
+    const tuesdayCandidates = await screen.findAllByText('Martes')
+    const tuesdayOption = tuesdayCandidates.find((element) => element.closest('[data-combobox-option="true"]'))
+    if (!tuesdayOption) {
+      throw new Error('No se encontró la opción Martes en el selector de día')
+    }
+    fireEvent.click(tuesdayOption)
     fireEvent.change(start, { target: { value: '08:00' } })
     fireEvent.change(end, { target: { value: '09:00' } })
 
@@ -104,13 +120,13 @@ describe('Admin CRUD básico', () => {
       { data: [existingSlot, ...newSlots] },
     ]
 
-    ;(api.get as any).mockImplementation((path: string) => {
-      if (path === '/timeslots/') {
-        const next = getQueue.shift()
-        return Promise.resolve(next ?? { data: [existingSlot, ...newSlots] })
-      }
-      return Promise.resolve({ data: [] })
-    })
+      ;(api.get as any).mockImplementation((path: string) => {
+        if (path === '/timeslots/') {
+          const next = getQueue.shift()
+          return Promise.resolve(next ?? { data: [existingSlot, ...newSlots] })
+        }
+        return Promise.resolve({ data: [] })
+      })
 
     const postSpy = api.post as ReturnType<typeof vi.fn>
     postSpy.mockImplementation(() => Promise.resolve({ data: { created: 4, skipped: 1, removed_timeslots: 0, removed_course_schedules: 0 } }))
@@ -251,4 +267,5 @@ describe('Admin CRUD básico', () => {
 
     confirmSpy.mockRestore()
   })
+
 })

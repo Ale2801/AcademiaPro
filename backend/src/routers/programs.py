@@ -6,6 +6,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Program
 from ..security import require_roles
+from ..utils.sqlmodel_helpers import apply_partial_update
 
 
 router = APIRouter(prefix="/programs", tags=["programs"]) 
@@ -47,8 +48,7 @@ def update_program(program_id: int, payload: ProgramUpdate, session=Depends(get_
     if not obj:
         raise HTTPException(status_code=404, detail="Programa no encontrado")
     update_data = payload.model_dump(exclude_unset=True)
-    for k, v in update_data.items():
-        setattr(obj, k, v)
+    apply_partial_update(obj, update_data)
     session.add(obj)
     session.commit()
     session.refresh(obj)

@@ -78,7 +78,12 @@ def test_timeslot_bulk_replace_removes_schedules(client: TestClient, admin_token
         session.commit()
         session.refresh(semester)
 
-        subject = Subject(code=f"SUBJ-BULK-{unique_suffix}", name="Materia Bulk", credits=3, program_id=program.id)
+        subject = Subject(
+            code=f"SUBJ-BULK-{unique_suffix}",
+            name="Materia Bulk",
+            program_id=program.id,
+            pedagogical_hours_per_week=4,
+        )
         session.add(subject)
         session.commit()
         session.refresh(subject)

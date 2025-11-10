@@ -32,3 +32,7 @@ if (typeof window !== 'undefined' && !('ResizeObserver' in window)) {
 if (typeof globalThis !== 'undefined' && !(globalThis as any).ResizeObserver) {
   ;(globalThis as any).ResizeObserver = ResizeObserverMock
 }
+
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}

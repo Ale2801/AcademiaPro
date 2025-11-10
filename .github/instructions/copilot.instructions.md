@@ -20,6 +20,7 @@
 - Config central en `backend/src/config.py`; lee `DATABASE_URL`, `SECRET_KEY`, `DEBUG` y expiraciones JWT de variables de entorno.
 - `backend/src/db.py` crea el engine; si la URL empieza con `sqlite` habilita `check_same_thread=False` para pruebas concurrentes.
 - Migrations: Alembic configurado en `backend/alembic.ini`; generar con `alembic revision --autogenerate` y aplicar con `alembic upgrade head` (ver README para comandos).
+- Si tocas modelos SQLModel debes generar y ejecutar la migración correspondiente tú mismo y confirmar que `alembic upgrade head` termina sin errores.
 
 ## Autenticación y permisos
 - `backend/src/security.py` define hashing bcrypt, emisión y validación de JWT con `python-jose` y dependencias `require_roles` para proteger endpoints.

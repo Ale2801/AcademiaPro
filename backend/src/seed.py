@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Dict, Optional, List
+from typing import Any, Dict, Optional, List
 
 from sqlmodel import Session, select
 
@@ -327,6 +327,43 @@ def _ensure_programs(session: Session) -> Dict[str, Program]:
 
 
 def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[str, Subject]:
+    def _int_or_none(value: Any) -> Optional[int]:  # type: ignore[name-defined]
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _derive_subject_hours(item: Dict[str, Any]) -> Dict[str, Any]:
+        base_hours = item.get("pedagogical_hours_per_week")
+        if base_hours is None:
+            base_hours = item.get("hours_per_week")
+        ped_hours = _int_or_none(base_hours) or 0
+
+        theoretical = _int_or_none(item.get("theoretical_hours_per_week"))
+        if theoretical is None:
+            theoretical = 0
+
+        practical = _int_or_none(item.get("practical_hours_per_week"))
+        if practical is None:
+            practical = 0
+        laboratory = _int_or_none(item.get("laboratory_hours_per_week"))
+        if laboratory is None:
+            laboratory = 0
+
+        autonomous = _int_or_none(item.get("weekly_autonomous_work_hours"))
+        if autonomous is None:
+            autonomous = 0
+
+        return {
+            "pedagogical_hours_per_week": ped_hours,
+            "theoretical_hours_per_week": theoretical,
+            "practical_hours_per_week": practical,
+            "laboratory_hours_per_week": laboratory,
+            "weekly_autonomous_work_hours": autonomous,
+        }
+
     data = [
         # ==================== INGENIERÍA EN SISTEMAS ====================
         # Semestre 1
@@ -1024,20 +1061,27 @@ def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[
     ]
     mapping: Dict[str, Subject] = {}
     for item in data:
+        program = program_map.get(item.get("program_code"))
+        hours_payload = _derive_subject_hours(item)
+        subject_attrs = {
+            "name": item["name"],
+            "description": item.get("description"),
+            "department": item.get("department"),
+            "level": item.get("level"),
+            "program_id": program.id if program else None,
+            **hours_payload,
+        }
+
         subject = session.exec(select(Subject).where(Subject.code == item["code"])).first()
-        if not subject:
-            program = program_map.get(item["program_code"])
-            subject = Subject(
-                code=item["code"],
-                name=item["name"],
-                credits=item["credits"],
-                description=item["description"],
-                hours_per_week=item["hours_per_week"],
-                program_id=program.id if program else None,
-            )
+        if subject:
+            for key, value in subject_attrs.items():
+                setattr(subject, key, value)
+        else:
+            subject = Subject(code=item["code"], **subject_attrs)
             session.add(subject)
-            session.commit()
-            session.refresh(subject)
+
+        session.commit()
+        session.refresh(subject)
         mapping[item["code"]] = subject
     return mapping
 

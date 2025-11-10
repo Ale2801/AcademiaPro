@@ -1,7 +1,7 @@
 """add program semester state
 
 Revision ID: b1d8e6c8285d
-Revises: a57de4569051
+Revises: 3a6d4a3f9c2f
 Create Date: 2024-10-09 00:00:00.000000
 """
 
@@ -12,7 +12,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision = 'b1d8e6c8285d'
-down_revision = '20251108_program_is_active'
+down_revision = '3a6d4a3f9c2f'
 branch_labels = None
 depends_on = None
 

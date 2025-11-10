@@ -7,6 +7,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Timeslot, CourseSchedule
 from ..security import require_roles
+from ..utils.sqlmodel_helpers import apply_partial_update, normalize_payload_for_model
 
 
 router = APIRouter(prefix="/timeslots", tags=["timeslots"]) 
@@ -119,15 +120,12 @@ def list_timeslots(session=Depends(get_session), user=Depends(require_roles("adm
 
 @router.post("/", response_model=Timeslot)
 def create_timeslot(timeslot: Timeslot, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator"))):
-	# Asegura tipos nativos para SQLite
-	if isinstance(timeslot.start_time, str):
-		timeslot.start_time = dt_time.fromisoformat(timeslot.start_time)
-	if isinstance(timeslot.end_time, str):
-		timeslot.end_time = dt_time.fromisoformat(timeslot.end_time)
-	session.add(timeslot)
+	data = normalize_payload_for_model(Timeslot, timeslot.model_dump())
+	obj = Timeslot(**data)
+	session.add(obj)
 	session.commit()
-	session.refresh(timeslot)
-	return timeslot
+	session.refresh(obj)
+	return obj
 
 
 @router.get("/{timeslot_id}", response_model=Timeslot)
@@ -144,12 +142,7 @@ def update_timeslot(timeslot_id: int, payload: Timeslot, session=Depends(get_ses
 	if not obj:
 		raise HTTPException(status_code=404, detail="Bloque horario no encontrado")
 	data = payload.model_dump(exclude_unset=True)
-	if isinstance(data.get("start_time"), str):
-		data["start_time"] = dt_time.fromisoformat(data["start_time"])
-	if isinstance(data.get("end_time"), str):
-		data["end_time"] = dt_time.fromisoformat(data["end_time"]) 
-	for k, v in data.items():
-		setattr(obj, k, v)
+	apply_partial_update(obj, data)
 	session.add(obj)
 	session.commit()
 	session.refresh(obj)

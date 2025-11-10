@@ -57,6 +57,29 @@ class StudentStatusEnum(str, Enum):
     withdrawn = "withdrawn"
 
 
+class StudyShiftEnum(str, Enum):
+    diurna = "diurna"
+    vespertina = "vespertina"
+    mixta = "mixta"
+    ejecutiva = "ejecutiva"
+
+
+class AdmissionTypeEnum(str, Enum):
+    paes = "paes"
+    pace = "pace"
+    traslado = "traslado"
+    especial = "especial"
+    otra = "otra"
+
+
+class FinancingTypeEnum(str, Enum):
+    gratuidad = "gratuidad"
+    beca = "beca"
+    credito = "credito"
+    particular = "particular"
+    empresa = "empresa"
+
+
 class ProgramEnrollmentStatusEnum(str, Enum):
     active = "active"
     completed = "completed"
@@ -122,12 +145,13 @@ class Student(SQLModel, table=True):
     section: Optional[str] = None
     modality: Optional[ModalityEnum] = Field(default=None, sa_column_kwargs={"nullable": True})
     status: StudentStatusEnum = Field(default=StudentStatusEnum.active)
+    study_shift: Optional[StudyShiftEnum] = Field(default=None, sa_column_kwargs={"nullable": True})
+    admission_type: Optional[AdmissionTypeEnum] = Field(default=None, sa_column_kwargs={"nullable": True})
+    financing_type: Optional[FinancingTypeEnum] = Field(default=None, sa_column_kwargs={"nullable": True})
+    cohort_year: Optional[int] = Field(default=None, description="Año de cohorte de ingreso")
     admission_date: Optional[date] = None
     expected_graduation_date: Optional[date] = None
-    gpa: Optional[float] = None
     current_term: Optional[str] = None
-    guardian_name: Optional[str] = None
-    guardian_phone: Optional[str] = None
 
 
 class StudentProgramEnrollment(SQLModel, table=True):
@@ -168,12 +192,35 @@ class Subject(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     code: str = Field(index=True, unique=True)
     name: str
-    credits: int
     description: Optional[str] = None
     department: Optional[str] = None
     level: Optional[str] = None  # niveles como básico/intermedio/avanzado u otro criterio
     program_id: Optional[int] = Field(default=None, foreign_key="program.id")
-    hours_per_week: Optional[int] = None
+    pedagogical_hours_per_week: int = Field(
+        default=0,
+        description="Horas pedagógicas (45 minutos) dictadas por semana",
+        nullable=False,
+    )
+    theoretical_hours_per_week: int = Field(
+        default=0,
+        description="Horas teóricas presenciales por semana",
+        nullable=False,
+    )
+    practical_hours_per_week: int = Field(
+        default=0,
+        description="Horas prácticas guiadas por semana",
+        nullable=False,
+    )
+    laboratory_hours_per_week: int = Field(
+        default=0,
+        description="Horas de laboratorio por semana",
+        nullable=False,
+    )
+    weekly_autonomous_work_hours: int = Field(
+        default=0,
+        description="Horas sugeridas de trabajo autónomo por semana",
+        nullable=False,
+    )
 
 
 class Course(SQLModel, table=True):

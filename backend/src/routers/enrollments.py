@@ -5,6 +5,7 @@ from sqlmodel import select
 from ..db import get_session
 from ..models import Enrollment
 from ..security import require_roles
+from ..utils.sqlmodel_helpers import apply_partial_update
 
 
 router = APIRouter(prefix="/enrollments", tags=["enrollments"]) 
@@ -36,8 +37,8 @@ def update_enrollment(enrollment_id: int, payload: Enrollment, session=Depends(g
 	obj = session.get(Enrollment, enrollment_id)
 	if not obj:
 		raise HTTPException(status_code=404, detail="Matrícula no encontrada")
-	for k, v in payload.model_dump(exclude_unset=True).items():
-		setattr(obj, k, v)
+	update_data = payload.model_dump(exclude_unset=True)
+	apply_partial_update(obj, update_data)
 	session.add(obj)
 	session.commit()
 	session.refresh(obj)

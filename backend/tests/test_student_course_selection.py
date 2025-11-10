@@ -71,7 +71,13 @@ def test_student_schedule_enrollment_flow(client: TestClient, admin_token: str):
         session.refresh(semester)
         semester_id = semester.id
 
-        subject = Subject(code="ALG-301", name="Álgebra Avanzada", credits=6, program_id=program.id)
+        subject = Subject(
+            code="ALG-301",
+            name="Álgebra Avanzada",
+            program_id=program.id,
+            pedagogical_hours_per_week=6,
+            weekly_autonomous_work_hours=3,
+        )
         session.add(subject)
         session.commit()
         session.refresh(subject)
@@ -262,7 +268,12 @@ def test_student_semester_selection_required(client: TestClient, admin_token: st
         session.refresh(semester)
         semester_id = semester.id
 
-        subject = Subject(code="SEM101", name="Introducción", credits=3, program_id=program.id)
+        subject = Subject(
+            code="SEM101",
+            name="Introducción",
+            program_id=program.id,
+            pedagogical_hours_per_week=3,
+        )
         session.add(subject)
         session.commit()
         session.refresh(subject)

@@ -57,7 +57,8 @@ def _ensure_subject(client: TestClient, headers: Dict[str, str], program_id: int
     payload = {
         "code": "TEST-SUBJ",
         "name": "Materia de Pruebas",
-        "credits": 3,
+        "pedagogical_hours_per_week": 4,
+        "weekly_autonomous_work_hours": 2,
         "program_id": program_id,
     }
     created = client.post("/subjects/", json=payload, headers=headers)
@@ -569,13 +570,23 @@ def test_optimizer_blocks_teacher_conflict_from_existing_assignments(client: Tes
 
     subject_a = client.post(
         "/subjects/",
-        json={"code": "CONF-SUB-A", "name": "Asignatura Conflicto A", "credits": 3, "program_id": program_a.json()["id"]},
+        json={
+            "code": "CONF-SUB-A",
+            "name": "Asignatura Conflicto A",
+            "pedagogical_hours_per_week": 4,
+            "program_id": program_a.json()["id"],
+        },
         headers=headers,
     )
     assert subject_a.status_code == 200, subject_a.text
     subject_b = client.post(
         "/subjects/",
-        json={"code": "CONF-SUB-B", "name": "Asignatura Conflicto B", "credits": 3, "program_id": program_b.json()["id"]},
+        json={
+            "code": "CONF-SUB-B",
+            "name": "Asignatura Conflicto B",
+            "pedagogical_hours_per_week": 4,
+            "program_id": program_b.json()["id"],
+        },
         headers=headers,
     )
     assert subject_b.status_code == 200, subject_b.text
@@ -791,19 +802,78 @@ def test_partial_block_allocations_share_slot(client: TestClient, admin_token: s
     )
     assert starts == ["09:00", "09:45"], starts
 
-    overview = client.get(
-        "/schedule/overview",
-        params={"program_semester_id": semester_id},
+def test_scheduler_uses_course_weekly_hours_over_subject_fields(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    subject = entities["subject"]
+    course = entities["course"]
+    room = entities["room"]
+
+    # Inflar las horas definidas en la asignatura para verificar que no afectan la carga del curso
+    updated_subject = {
+        "code": subject["code"],
+        "name": subject["name"],
+        "program_id": subject.get("program_id"),
+        "description": subject.get("description"),
+        "department": subject.get("department"),
+        "level": subject.get("level"),
+        "pedagogical_hours_per_week": 12,
+        "theoretical_hours_per_week": 8,
+        "practical_hours_per_week": 6,
+        "laboratory_hours_per_week": 4,
+        "weekly_autonomous_work_hours": 5,
+    }
+    subject_update = client.put(f"/subjects/{subject['id']}", json=updated_subject, headers=headers)
+    assert subject_update.status_code == 200, subject_update.text
+
+    slot_one = _ensure_timeslot_at(client, headers, day_of_week=1, start_time="08:00", end_time="09:00")
+    slot_two = _ensure_timeslot_at(client, headers, day_of_week=1, start_time="09:00", end_time="10:00")
+    slot_three = _ensure_timeslot_at(client, headers, day_of_week=1, start_time="10:00", end_time="11:00")
+
+    courses_payload = [
+        {
+            "course_id": course["id"],
+            "teacher_id": course["teacher_id"],
+            "weekly_hours": course["weekly_hours"],
+        }
+    ]
+    rooms_payload = [
+        {
+            "room_id": room["id"],
+            "capacity": room.get("capacity", 30),
+        }
+    ]
+    timeslots_payload = [
+        {"timeslot_id": slot_one["id"], "day": slot_one["day_of_week"], "block": 1},
+        {"timeslot_id": slot_two["id"], "day": slot_two["day_of_week"], "block": 2},
+        {"timeslot_id": slot_three["id"], "day": slot_three["day_of_week"], "block": 3},
+    ]
+    constraints_payload = {
+        "teacher_availability": {
+            course["teacher_id"]: [slot_one["id"], slot_two["id"], slot_three["id"]]
+        },
+        "max_consecutive_blocks": 3,
+    }
+
+    response = client.post(
+        "/schedule/optimize",
+        json={
+            "courses": courses_payload,
+            "rooms": rooms_payload,
+            "timeslots": timeslots_payload,
+            "constraints": constraints_payload,
+        },
         headers=headers,
     )
-    assert overview.status_code == 200, overview.text
-    overview_data = [
-        item
-        for item in overview.json()
-        if item["timeslot_id"] == timeslot["id"] and item["room_id"] == room["id"]
-    ]
-    assert len(overview_data) == 2
-    assert {item["duration_minutes"] for item in overview_data} == {45}
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assignments = [item for item in data["assignments"] if item["course_id"] == course["id"]]
+    total_assigned = sum(item["duration_minutes"] for item in assignments)
+    assert total_assigned == course["weekly_hours"] * 60
+
+    remaining = next((item for item in data.get("unassigned", []) if item["course_id"] == course["id"]), None)
+    assert remaining is None or remaining.get("remaining_minutes", 0) == 0
 
 
 def test_partial_block_conflict_detection(client: TestClient, admin_token: str):

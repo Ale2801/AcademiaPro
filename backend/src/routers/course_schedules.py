@@ -6,6 +6,7 @@ from ..db import get_session
 from ..models import CourseSchedule, Course, Timeslot
 from ..security import require_roles
 from .schedule import _resolve_interval, _assert_no_overlap
+from ..utils.sqlmodel_helpers import apply_partial_update
 
 
 router = APIRouter(prefix="/course-schedules", tags=["course_schedules"]) 
@@ -100,8 +101,7 @@ def update_course_schedule(cs_id: int, payload: CourseSchedule, session=Depends(
 	updates["duration_minutes"] = target_interval[1] - target_interval[0]
 	updates["start_offset_minutes"] = target_interval[0]
 
-	for k, v in updates.items():
-		setattr(obj, k, v)
+	apply_partial_update(obj, updates)
 	session.add(obj)
 	session.commit()
 	session.refresh(obj)

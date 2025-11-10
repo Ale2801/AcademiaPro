@@ -13,6 +13,10 @@ import CoordinatorDashboard from './ui/dashboards/CoordinatorDashboard'
 import TeacherDashboard from './ui/dashboards/TeacherDashboard'
 import StudentDashboard from './ui/dashboards/StudentDashboard'
 import StudentMatriculationDashboard from './ui/dashboards/StudentMatriculationDashboard'
+import StudentSchedulePlannerDashboard from './ui/dashboards/StudentSchedulePlannerDashboard'
+import ProgramDetailPage from './ui/programs/ProgramDetailPage'
+import TeacherDetailPage from './ui/teachers/TeacherDetailPage'
+import StudentDetailPage from './ui/students/StudentDetailPage'
 
 const theme = createTheme({
 	primaryColor: 'indigo',
@@ -40,10 +44,14 @@ const router = createBrowserRouter([
 	{ path: '/app', element: <App /> },
 	{ path: '/dashboard/admin', element: <AdminDashboard /> },
 	{ path: '/dashboard/admin/settings', element: <AdminSettingsDashboard /> },
+	{ path: '/dashboard/admin/programs/:programId', element: <ProgramDetailPage /> },
+	{ path: '/dashboard/admin/teachers/:teacherId', element: <TeacherDetailPage /> },
+	{ path: '/dashboard/admin/students/:studentId', element: <StudentDetailPage /> },
 	{ path: '/dashboard/coordinator', element: <CoordinatorDashboard /> },
 	{ path: '/dashboard/teacher', element: <TeacherDashboard /> },
 	{ path: '/dashboard/student', element: <StudentDashboard /> },
 	{ path: '/dashboard/student/matricula', element: <StudentMatriculationDashboard /> },
+	{ path: '/dashboard/student/planificador', element: <StudentSchedulePlannerDashboard /> },
 ])
 
 const root = createRoot(document.getElementById('root')!)
