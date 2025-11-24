@@ -22,6 +22,7 @@ from .models import (
     StudentProgramEnrollment,
     StudentStatusEnum,
     Subject,
+    SubjectPrerequisite,
     Teacher,
     Timeslot,
     User,
@@ -138,6 +139,7 @@ def ensure_demo_data() -> None:
         program_map = _ensure_programs(session)
         semester_map = _ensure_program_semesters(session, program_map)
         subject_map = _ensure_subjects(session, program_map)
+        _ensure_subject_prerequisites(session, subject_map)
         teacher_map = _ensure_teachers(session)
         room_map = _ensure_rooms(session)
         timeslot_map = _ensure_timeslots(session)
@@ -1084,6 +1086,91 @@ def _ensure_subjects(session: Session, program_map: Dict[str, Program]) -> Dict[
         session.refresh(subject)
         mapping[item["code"]] = subject
     return mapping
+
+
+def _ensure_subject_prerequisites(session: Session, subject_map: Dict[str, Subject]) -> None:
+    matrix: Dict[str, List[str]] = {
+        # Ingeniería en Sistemas
+        "MAT201": ["MAT101"],
+        "PRO201": ["PRO101"],
+        "EST201": ["PRO101"],
+        "ALG201": ["MAT101"],
+        "MAT301": ["MAT201"],
+        "BD301": ["PRO201"],
+        "SIS320": ["PRO201", "EST201"],
+        "ALG301": ["ALG201"],
+        "ARQ301": ["PRO201"],
+        "PRO301": ["PRO201"],
+        "RED401": ["SIS320"],
+        "ING401": ["PRO301"],
+        "SEG401": ["RED401"],
+        "BD401": ["BD301"],
+        "MOV401": ["PRO301"],
+        # Administración de Empresas
+        "ADM120": ["CON101"],
+        "ECO201": ["ECO101"],
+        "EST202": ["MAT102"],
+        "FIN201": ["MAT102"],
+        "RHU201": ["ADM101"],
+        "ADM210": ["ADM101"],
+        "FIN301": ["FIN201"],
+        "OPE301": ["ADM120"],
+        "ADM315": ["ADM210"],
+        "MKT401": ["ADM210"],
+        "NEG401": ["ADM210"],
+        "AUD401": ["CON101"],
+        "RSE401": ["ADM210"],
+        # Ciencia de Datos Avanzada
+        "DS530": ["DS501"],
+        "DL601": ["DS530"],
+        "NLP601": ["DS530"],
+        "VIS601": ["DS510"],
+        "OPT601": ["MAT501"],
+        "ETI601": ["DS501"],
+        # Ingeniería Industrial
+        "IND240": ["IND130"],
+        "EST203": ["MAT103"],
+        "PRO203": ["IND130"],
+        "MAT203": ["MAT103"],
+        "IND301": ["IND240", "MAT203"],
+        "PRO303": ["IND240"],
+        "CAL301": ["EST203"],
+        "ING303": ["IND240"],
+        "AUT301": ["PRO203"],
+        "IND401": ["IND301"],
+        "PLA401": ["IND301"],
+        "SEG403": ["IND240"],
+        "FIN403": ["MAT203"],
+        "SIM401": ["IND301"],
+        "GES401": ["IND240"],
+    }
+
+    dirty = False
+    for subject_code, prereq_codes in matrix.items():
+        subject = subject_map.get(subject_code)
+        if not subject:
+            continue
+        for prereq_code in prereq_codes:
+            prerequisite = subject_map.get(prereq_code)
+            if not prerequisite:
+                continue
+            existing = session.exec(
+                select(SubjectPrerequisite).where(
+                    SubjectPrerequisite.subject_id == subject.id,
+                    SubjectPrerequisite.prerequisite_subject_id == prerequisite.id,
+                )
+            ).first()
+            if existing:
+                continue
+            session.add(
+                SubjectPrerequisite(
+                    subject_id=subject.id,
+                    prerequisite_subject_id=prerequisite.id,
+                )
+            )
+            dirty = True
+    if dirty:
+        session.commit()
 
 
 def _ensure_teachers(session: Session) -> Dict[str, Teacher]:

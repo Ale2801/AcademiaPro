@@ -23,6 +23,7 @@ import {
   ScrollArea,
   SegmentedControl,
   Select,
+  MultiSelect,
   SimpleGrid,
   Stack,
   Switch,
@@ -146,6 +147,7 @@ type Subject = {
   practical_hours_per_week?: number
   laboratory_hours_per_week?: number
   weekly_autonomous_work_hours?: number
+  prerequisite_subject_ids?: number[] | null
 }
 
 type StudentRow = {
@@ -233,6 +235,8 @@ export function CrudSection({ section }: CrudSectionProps) {
     for (const field of section.fields) {
       if (field.type === 'checkbox') {
         defaults[field.name] = false
+      } else if (field.type === 'multiselect') {
+        defaults[field.name] = []
       } else if (field.type === 'number' && zeroDefaults.has(field.name)) {
         defaults[field.name] = 0
       } else {
@@ -600,11 +604,14 @@ export function CrudSection({ section }: CrudSectionProps) {
 
   const subjectOptionMap = useMemo(() => {
     const map = new Map<number, string>()
-    const options = selectOptions.subject_id ?? []
-    for (const option of options) {
-      const id = Number(option.value)
-      if (Number.isFinite(id)) {
-        map.set(id, option.label)
+    const optionKeys: Array<keyof OptionMap> = ['subject_id', 'prerequisite_subject_ids']
+    for (const key of optionKeys) {
+      const options = selectOptions[key] ?? []
+      for (const option of options) {
+        const id = Number(option.value)
+        if (Number.isFinite(id)) {
+          map.set(id, option.label)
+        }
       }
     }
     return map
@@ -831,6 +838,19 @@ export function CrudSection({ section }: CrudSectionProps) {
       }
       if (section.key === 'timeslots' && field.name === 'day_of_week' && value != null) {
         value = String(value)
+      }
+      if (field.type === 'multiselect') {
+        if (Array.isArray(value)) {
+          values[field.name] = value.map((entry) => String(entry))
+        } else if (typeof value === 'string' && value.trim()) {
+          values[field.name] = value
+            .split(',')
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0)
+        } else {
+          values[field.name] = []
+        }
+        continue
       }
       values[field.name] = selectOptions[field.name] ? String(value) : value
     }
@@ -1793,6 +1813,9 @@ export function CrudSection({ section }: CrudSectionProps) {
                   const laboratoryHours = Number(subject.laboratory_hours_per_week) || 0
                   const autonomousHours = Number(subject.weekly_autonomous_work_hours) || 0
                   const contactHours = theoreticalHours + practicalHours + laboratoryHours
+                  const prerequisiteIds = Array.isArray(subject.prerequisite_subject_ids)
+                    ? subject.prerequisite_subject_ids
+                    : []
 
                   return (
                     <Table.Tr key={subject.id ?? `subject-${Math.random()}`}>
@@ -1836,6 +1859,20 @@ export function CrudSection({ section }: CrudSectionProps) {
                             <Text size="xs" c="dimmed">Trabajo autónomo: {autonomousHours.toFixed(1)} h/sem</Text>
                           ) : null}
                           <Text size="xs" c="dimmed">ID interno: {subject.id}</Text>
+                          {prerequisiteIds.length > 0 ? (
+                            <Stack gap={2}>
+                              <Text size="xs" c="dimmed">Prerrequisitos:</Text>
+                              <Group gap="xs" wrap="wrap">
+                                {prerequisiteIds.map((prereqId) => (
+                                  <Badge key={`${subject.id}-prereq-${prereqId}`} size="xs" color="gray" variant="light">
+                                    {resolveSubjectLabel(prereqId, `Asignatura #${prereqId}`)}
+                                  </Badge>
+                                ))}
+                              </Group>
+                            </Stack>
+                          ) : (
+                            <Text size="xs" c="dimmed">Prerrequisitos: ninguno</Text>
+                          )}
                         </Stack>
                       </Table.Td>
                       <Table.Td>
@@ -1871,7 +1908,7 @@ export function CrudSection({ section }: CrudSectionProps) {
         </ScrollArea.Autosize>
       </Stack>
     )
-  }, [filteredAndSortedItems, handleEditRow, onDelete, resolveProgramLabel, section.key])
+  }, [filteredAndSortedItems, handleEditRow, onDelete, resolveProgramLabel, resolveSubjectLabel, section.key])
 
   return (
     <Stack gap="xl">
@@ -1997,6 +2034,29 @@ export function CrudSection({ section }: CrudSectionProps) {
                                 </Group>
                               )
                             }}
+                          />
+                        )}
+                      />
+                    )
+                  }
+                  if (field.type === 'multiselect') {
+                    const data = relationOptions ?? field.options ?? []
+                    return (
+                      <Controller
+                        key={field.name}
+                        control={control}
+                        name={field.name}
+                        render={({ field: controllerField }) => (
+                          <MultiSelect
+                            label={field.label || field.name}
+                            placeholder={field.placeholder || (field.required ? 'Selecciona uno o más valores' : 'Opcional')}
+                            data={data}
+                            value={Array.isArray(controllerField.value) ? controllerField.value : []}
+                            onChange={(value) => controllerField.onChange(value)}
+                            error={(errors as any)[field.name]?.message as string | undefined}
+                            searchable
+                            clearable
+                            nothingFoundMessage="Sin resultados"
                           />
                         )}
                       />

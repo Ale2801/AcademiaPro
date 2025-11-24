@@ -5,6 +5,70 @@ def _auth_headers(token: str) -> dict[str, str]:
 	return {"Authorization": f"Bearer {token}"}
 
 
+def _subject_payload(code: str, name: str) -> dict[str, object]:
+	return {
+		"code": code,
+		"name": name,
+		"pedagogical_hours_per_week": 4,
+		"weekly_autonomous_work_hours": 2,
+	}
+
+
+def test_subject_prerequisites_flow(client: TestClient, admin_token: str):
+	headers = _auth_headers(admin_token)
+
+	base_resp = client.post("/subjects/", json=_subject_payload("PRE-BASE-1", "Base 1"), headers=headers)
+	assert base_resp.status_code == 200, base_resp.text
+	base_id = base_resp.json()["id"]
+
+	alt_resp = client.post("/subjects/", json=_subject_payload("PRE-BASE-2", "Base 2"), headers=headers)
+	assert alt_resp.status_code == 200, alt_resp.text
+	alt_id = alt_resp.json()["id"]
+
+	advanced_payload = _subject_payload("PRE-ADV-1", "Avanzada 1 | Física")
+	advanced_payload["prerequisite_subject_ids"] = [base_id]
+	advanced_resp = client.post("/subjects/", json=advanced_payload, headers=headers)
+	assert advanced_resp.status_code == 200, advanced_resp.text
+	advanced = advanced_resp.json()
+	assert advanced["prerequisite_subject_ids"] == [base_id]
+
+	# Update to include multiple prerequisites
+	update_payload = {
+		"id": advanced["id"],
+		"code": advanced["code"],
+		"name": "Avanzada 1 Revisada",
+		"pedagogical_hours_per_week": advanced["pedagogical_hours_per_week"],
+		"weekly_autonomous_work_hours": advanced["weekly_autonomous_work_hours"],
+		"prerequisite_subject_ids": [base_id, alt_id],
+	}
+	update_resp = client.put(f"/subjects/{advanced['id']}", json=update_payload, headers=headers)
+	assert update_resp.status_code == 200, update_resp.text
+	assert set(update_resp.json()["prerequisite_subject_ids"]) == {base_id, alt_id}
+
+	# Removing all prerequisites should persist the change
+	clear_payload = update_payload | {"prerequisite_subject_ids": []}
+	clear_resp = client.put(f"/subjects/{advanced['id']}", json=clear_payload, headers=headers)
+	assert clear_resp.status_code == 200, clear_resp.text
+	assert clear_resp.json()["prerequisite_subject_ids"] == []
+
+	# Listing should include the prerequisite field
+	listing = client.get("/subjects/", headers=headers)
+	assert listing.status_code == 200, listing.text
+	details = {item["id"]: item for item in listing.json()}
+	assert advanced["id"] in details
+	assert details[advanced["id"]]["prerequisite_subject_ids"] == []
+
+	# Validation: cannot point to non-existent subject
+	invalid_payload = clear_payload | {"prerequisite_subject_ids": [999999]}
+	invalid_resp = client.put(f"/subjects/{advanced['id']}", json=invalid_payload, headers=headers)
+	assert invalid_resp.status_code == 404
+
+	# Validation: cannot require itself
+	self_payload = clear_payload | {"prerequisite_subject_ids": [advanced["id"]]}
+	self_resp = client.put(f"/subjects/{advanced['id']}", json=self_payload, headers=headers)
+	assert self_resp.status_code == 400
+
+
 def test_crud_updates_accept_iso_strings(client: TestClient, admin_token: str):
 	headers = _auth_headers(admin_token)
 

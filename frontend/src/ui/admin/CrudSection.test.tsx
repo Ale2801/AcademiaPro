@@ -58,9 +58,51 @@ vi.mock('@mantine/core', async () => {
     )
   }
 
+  const MultiSelect = ({
+    data = [],
+    value,
+    onChange,
+    label,
+    placeholder,
+    error,
+  }: {
+    data?: Array<{ value: string; label: string }>
+    value?: string[] | null
+    onChange?: (value: string[]) => void
+    label?: string
+    placeholder?: string
+    error?: string
+  }) => {
+    const labelText = label ?? placeholder ?? 'Selecciona opciones'
+    const id = `multiselect-${labelText.replace(/\s+/g, '-').toLowerCase()}`
+    const normalized = Array.isArray(value) ? value : value ? [value] : []
+    return (
+      <label htmlFor={id} style={{ display: 'block' }}>
+        {labelText}
+        <select
+          id={id}
+          aria-invalid={error ? 'true' : 'false'}
+          multiple
+          value={normalized}
+          onChange={(event) => {
+            const selected = Array.from(event.target.selectedOptions).map((option) => option.value)
+            onChange?.(selected)
+          }}
+        >
+          {data.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
+  }
+
   return {
     ...actual,
     Select,
+    MultiSelect,
   }
 })
 
@@ -107,6 +149,7 @@ const relationValues: Record<string, string> = {
   user_id: '100',
   program_id: '1',
   subject_id: '40',
+  prerequisite_subject_ids: '40',
   teacher_id: '30',
   program_semester_id: '10',
   student_id: '20',
@@ -143,6 +186,13 @@ function sampleValueForField(field: Field): any {
     return field.options?.[0]?.value ?? 'opcion'
   }
 
+  if (field.type === 'multiselect') {
+    const relationMatch = relationValues[field.name]
+    if (relationMatch) return [relationMatch]
+    const option = field.options?.[0]?.value ?? 'opcion'
+    return [option]
+  }
+
   if (field.type === 'number') {
     return numberSamples[field.name] ?? '1'
   }
@@ -174,6 +224,20 @@ async function fillField(field: Field, value: any) {
   }
 
   const fieldElement = (await screen.findByLabelText(label)) as HTMLElement
+  if (field.type === 'multiselect') {
+    const selectElement = fieldElement as HTMLSelectElement
+    const values = Array.isArray(value) ? value.map((entry) => String(entry)) : value ? [String(value)] : []
+    for (const option of Array.from(selectElement.options)) {
+      option.selected = values.includes(option.value)
+    }
+    fireEvent.change(selectElement)
+    await waitFor(() => {
+      const selectedValues = Array.from(selectElement.selectedOptions).map((option) => option.value)
+      expect(selectedValues).toEqual(values)
+    })
+    return
+  }
+
   if (fieldElement instanceof HTMLSelectElement) {
     await waitFor(() => {
       const option = Array.from(fieldElement.querySelectorAll('option')).find((node) => node.getAttribute('value') === value)
@@ -249,5 +313,44 @@ describe('CrudSection formularios', () => {
     const [endpointArg, payloadArg] = apiModule.post.mock.calls[0]
     expect(endpointArg).toBe(expectedEndpoint)
     expect(payloadArg).toMatchObject(expectedSubset)
+  })
+
+  it('permite seleccionar prerrequisitos al crear una asignatura', async () => {
+    const subjectSection = crudSections.find((section) => section.key === 'subjects')
+    expect(subjectSection).toBeDefined()
+    if (!subjectSection) return
+
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <MantineProvider>
+          <CrudSection section={subjectSection} />
+        </MantineProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(apiModule.get).toHaveBeenCalledWith(subjectSection.endpoint))
+
+    const requiredValues: Record<string, any> = {}
+    for (const field of subjectSection.fields) {
+      if (!field.required) continue
+      const value = sampleValueForField(field)
+      requiredValues[field.name] = value
+      await fillField(field, value)
+    }
+
+    const prereqField = subjectSection.fields.find((field) => field.name === 'prerequisite_subject_ids')
+    expect(prereqField).toBeDefined()
+    const prereqValue = ['40']
+    if (prereqField) {
+      await fillField(prereqField, prereqValue)
+    }
+
+    const submitButton = await screen.findByRole('button', { name: 'Crear registro' })
+    await user.click(submitButton)
+
+    await waitFor(() => expect(apiModule.post).toHaveBeenCalledOnce())
+    const [, payloadArg] = apiModule.post.mock.calls[0]
+    expect(payloadArg.prerequisite_subject_ids).toEqual([40])
   })
 })

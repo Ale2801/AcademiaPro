@@ -23,6 +23,7 @@ Sistema académico completo para gestionar catálogos, cursos y horarios con un 
 ## Características principales
 - Autenticación JWT con roles (`admin`, `teacher`, `student`) y guardas de acceso en routers.
 - CRUD completo de programas, asignaturas, cursos, docentes, estudiantes, matrículas, evaluaciones y asistencia.
+- Asignaturas con prerrequisitos configurables para reforzar el flujo de aprobación previo a cursar nuevas materias.
 - Optimizador de horarios con granularidad de 15 minutos que respeta disponibilidad docente, restricciones de sala, recesos configurables, máximos de bloques consecutivos y límites diarios por programa.
 - Exportación de horarios (Excel/PDF) y guardado persistente de asignaciones.
 - Módulo de **Ajustes de Aplicación** (modelo `AppSetting`, endpoints `/settings`, seed con valores de branding y plataforma).

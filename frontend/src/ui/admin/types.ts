@@ -8,7 +8,7 @@ export type FieldOption = {
 export type Field = {
   name: string
   label?: string
-  type: 'text' | 'number' | 'date' | 'time' | 'checkbox' | 'select'
+  type: 'text' | 'number' | 'date' | 'time' | 'checkbox' | 'select' | 'multiselect'
   placeholder?: string
   required?: boolean
   options?: FieldOption[]

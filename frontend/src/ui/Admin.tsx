@@ -13,12 +13,14 @@ import {
   IconRefresh,
   IconSchool,
   IconUsersGroup,
+  IconTopologyStar3,
 } from '@tabler/icons-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { CrudSection } from './admin/CrudSection'
 import type { Section } from './admin/types'
 import GlobalScheduleOptimizer from './components/GlobalScheduleOptimizer'
 import SchedulePlanner from './components/SchedulePlanner'
+import CurriculumGraph from './components/CurriculumGraph'
 
 export const crudSections: Section[] = [
   {
@@ -180,6 +182,12 @@ export const crudSections: Section[] = [
       { name: 'practical_hours_per_week', type: 'number', label: 'Horas prácticas semanales', placeholder: 'Ej. 0' },
       { name: 'laboratory_hours_per_week', type: 'number', label: 'Horas de laboratorio semanales', placeholder: 'Ej. 0' },
       { name: 'weekly_autonomous_work_hours', type: 'number', label: 'Trabajo autónomo semanal', placeholder: 'Ej. 0' },
+      {
+        name: 'prerequisite_subject_ids',
+        type: 'multiselect',
+        label: 'Prerrequisitos',
+        placeholder: 'Selecciona asignaturas previas',
+      },
     ],
   },
   {
@@ -331,12 +339,16 @@ export const crudSections: Section[] = [
 
 const plannerTabKey = 'planner'
 const globalPlannerTabKey = 'global-planner'
+const curriculumGraphTabKey = 'curriculum-graph'
 
 export function Admin() {
   const location = useLocation()
   const navigate = useNavigate()
   const defaultTab = crudSections[0]?.key ?? plannerTabKey
-  const validTabs = useMemo(() => new Set<string>([...crudSections.map((section) => section.key), plannerTabKey, globalPlannerTabKey]), [])
+  const validTabs = useMemo(
+    () => new Set<string>([...crudSections.map((section) => section.key), plannerTabKey, globalPlannerTabKey, curriculumGraphTabKey]),
+    [],
+  )
   const deriveTabFromSearch = useCallback((search: string) => {
     const params = new URLSearchParams(search)
     const sectionParam = params.get('section')
@@ -349,6 +361,7 @@ export function Admin() {
   const current = crudSections.find((section) => section.key === active)
   const isPlanner = active === plannerTabKey
   const isGlobalPlanner = active === globalPlannerTabKey
+  const isCurriculumGraph = active === curriculumGraphTabKey
 
   useEffect(() => {
     const nextTab = deriveTabFromSearch(location.search)
@@ -417,11 +430,22 @@ export function Admin() {
             <Tabs.Tab value={globalPlannerTabKey} leftSection={<IconCalendarPlus size={16} />}>
               Optimizador global
             </Tabs.Tab>
+            <Tabs.Tab value={curriculumGraphTabKey} leftSection={<IconTopologyStar3 size={16} />}>
+              Malla académica
+            </Tabs.Tab>
           </Tabs.List>
         </Tabs>
       </Card>
 
-      {isPlanner ? <SchedulePlanner /> : isGlobalPlanner ? <GlobalScheduleOptimizer /> : current && <CrudSection section={current} />}
+      {isPlanner ? (
+        <SchedulePlanner />
+      ) : isGlobalPlanner ? (
+        <GlobalScheduleOptimizer />
+      ) : isCurriculumGraph ? (
+        <CurriculumGraph />
+      ) : (
+        current && <CrudSection section={current} />
+      )}
     </Stack>
   )
 }

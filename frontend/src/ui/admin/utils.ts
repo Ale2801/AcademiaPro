@@ -37,6 +37,23 @@ export function normalizePayload(fields: Field[], form: Record<string, any>) {
   ])
   for (const field of fields) {
     let value = form[field.name]
+
+    if (field.type === 'multiselect') {
+      const rawArray = Array.isArray(value) ? value : value ? [value] : []
+      const normalized = rawArray
+        .map((entry) => {
+          if (entry === null || entry === undefined) return null
+          if (typeof entry === 'number') return entry
+          const trimmed = String(entry).trim()
+          if (!trimmed) return null
+          const numeric = Number(trimmed)
+          return Number.isNaN(numeric) ? trimmed : numeric
+        })
+        .filter((entry) => entry !== null) as Array<string | number>
+      out[field.name] = normalized
+      continue
+    }
+
     if (value === '' || value === undefined || value === null) {
       if (zeroDefaultFields.has(field.name)) {
         out[field.name] = 0
@@ -157,6 +174,11 @@ export function buildSchema(fields: Field[]) {
         }
         break
       }
+      case 'multiselect': {
+        const schema = z.array(z.string(), { invalid_type_error: 'Selecciona valores válidos' })
+        shape[field.name] = field.required ? schema.min(1, 'Selecciona al menos una opción') : schema.optional()
+        break
+      }
       case 'text':
       default: {
         const base = z.string().transform((val: string) => (val === '' ? undefined : val))
@@ -187,6 +209,8 @@ export function endpointFor(fieldName: string): string | undefined {
       return '/timeslots/'
     case 'program_semester_id':
       return '/program-semesters/'
+    case 'prerequisite_subject_ids':
+      return '/subjects/'
     default:
       return undefined
   }

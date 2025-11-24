@@ -188,8 +188,7 @@ class Room(SQLModel, table=True):
     notes: Optional[str] = None
 
 
-class Subject(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+class SubjectBase(SQLModel):
     code: str = Field(index=True, unique=True)
     name: str
     description: Optional[str] = None
@@ -222,6 +221,22 @@ class Subject(SQLModel, table=True):
         nullable=False,
     )
 
+
+class Subject(SubjectBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class SubjectPrerequisite(SQLModel, table=True):
+    subject_id: Optional[int] = Field(
+        default=None,
+        foreign_key="subject.id",
+        primary_key=True,
+    )
+    prerequisite_subject_id: Optional[int] = Field(
+        default=None,
+        foreign_key="subject.id",
+        primary_key=True,
+    )
 
 class Course(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
