@@ -4,7 +4,7 @@ from sqlmodel import select
 
 from ..db import get_session
 from ..models import Student, User, Program
-from ..security import require_roles
+from ..security import get_current_user, require_roles
 from ..utils.sqlmodel_helpers import apply_partial_update
 
 
@@ -14,6 +14,14 @@ router = APIRouter(prefix="/students", tags=["students"])
 @router.get("/", response_model=List[Student])
 def list_students(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
     return session.exec(select(Student)).all()
+
+
+@router.get("/me", response_model=Student)
+def get_my_student(session=Depends(get_session), user=Depends(get_current_user)):
+    obj = session.exec(select(Student).where(Student.user_id == user.id)).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Perfil de estudiante no encontrado")
+    return obj
 
 
 @router.post("/", response_model=Student)

@@ -22,7 +22,7 @@ class ProgramUpdate(BaseModel):
 
 
 @router.get("/", response_model=List[Program])
-def list_programs(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def list_programs(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     return session.exec(select(Program)).all()
 
 
@@ -35,7 +35,7 @@ def create_program(program: Program, session=Depends(get_session), user=Depends(
 
 
 @router.get("/{program_id}", response_model=Program)
-def get_program(program_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def get_program(program_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     obj = session.get(Program, program_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Programa no encontrado")

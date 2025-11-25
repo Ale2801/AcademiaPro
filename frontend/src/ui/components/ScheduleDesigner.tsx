@@ -99,6 +99,8 @@ export type ScheduleDesignerProps = {
   onEditAssignment: (assignment: ScheduleEntry) => void
   onDeleteAssignment: (assignment: ScheduleEntry) => void | Promise<void>
   loading?: boolean
+  highlightCourseId?: number | null
+  onHighlightConsumed?: () => void
 }
 
 function formatRange(start: string | null, end: string | null) {
@@ -113,7 +115,7 @@ function translateStyle(transform: Transform | null) {
   }
 }
 
-function CourseCard({ course, disabled }: { course: CourseSummary; disabled?: boolean }) {
+function CourseCard({ course, disabled, highlighted }: { course: CourseSummary; disabled?: boolean; highlighted?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `course-${course.id}`,
     data: { type: 'course', course },
@@ -149,6 +151,7 @@ function CourseCard({ course, disabled }: { course: CourseSummary; disabled?: bo
 
   return (
     <Card
+      id={`planner-course-${course.id}`}
       ref={setNodeRef}
       padding="md"
       radius="lg"
@@ -158,6 +161,9 @@ function CourseCard({ course, disabled }: { course: CourseSummary; disabled?: bo
       style={{
         cursor: disabled ? 'not-allowed' : 'grab',
         opacity: disabled ? 0.5 : isDragging ? 0.6 : 1,
+        boxShadow: highlighted ? '0 0 0 2px var(--mantine-color-yellow-5)' : undefined,
+        backgroundColor: highlighted ? 'var(--mantine-color-yellow-light)' : undefined,
+        transition: 'box-shadow 160ms ease, background-color 160ms ease, opacity 120ms ease',
         ...translateStyle(transform),
       }}
     >
@@ -339,6 +345,8 @@ export function ScheduleDesigner({
   onEditAssignment,
   onDeleteAssignment,
   loading,
+  highlightCourseId,
+  onHighlightConsumed,
 }: ScheduleDesignerProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -398,6 +406,43 @@ export function ScheduleDesigner({
     }
   }
 
+  useEffect(() => {
+    if (highlightCourseId == null) return
+    const element = document.getElementById(`planner-course-${highlightCourseId}`)
+    if (!element) return
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlightCourseId, courses])
+
+  useEffect(() => {
+    if (highlightCourseId == null) return
+    if (typeof window === 'undefined') return
+    const element = document.getElementById(`planner-course-${highlightCourseId}`)
+    if (!element) return
+
+    let timeoutId: number | null = null
+    let hasTriggered = false
+
+    const observer = new IntersectionObserver((entries) => {
+      if (hasTriggered) return
+      if (entries.some((entry) => entry.isIntersecting)) {
+        hasTriggered = true
+        observer.disconnect()
+        timeoutId = window.setTimeout(() => {
+          onHighlightConsumed?.()
+        }, 2500)
+      }
+    }, { threshold: 0.35 })
+
+    observer.observe(element)
+
+    return () => {
+      observer.disconnect()
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+  }, [highlightCourseId, courses, onHighlightConsumed])
+
   const renderOverlay = () => {
     if (!activeDrag) return null
     if (activeDrag.type === 'course') {
@@ -448,6 +493,7 @@ export function ScheduleDesigner({
                           key={course.id}
                           course={course}
                           disabled={loading || fulfilled}
+                          highlighted={highlightCourseId === course.id}
                         />
                       )
                     })

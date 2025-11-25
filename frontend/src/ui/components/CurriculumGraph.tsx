@@ -65,12 +65,17 @@ type NodeCenter = {
   cy: number
 }
 
-export function CurriculumGraph() {
+type CurriculumGraphProps = {
+  forcedProgramId?: number | null
+  hideProgramSelector?: boolean
+}
+
+export function CurriculumGraph({ forcedProgramId = null, hideProgramSelector = false }: CurriculumGraphProps = {}) {
   const [programs, setPrograms] = useState<Program[]>([])
   const [semesters, setSemesters] = useState<ProgramSemester[]>([])
   const [courses, setCourses] = useState<Course[]>([])
   const [subjects, setSubjects] = useState<Subject[]>([])
-  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(null)
+  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(() => (typeof forcedProgramId === 'number' ? forcedProgramId : null))
   const [hoveredSubjectId, setHoveredSubjectId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -112,10 +117,19 @@ export function CurriculumGraph() {
     }
   }, [])
 
+  const programLocked = typeof forcedProgramId === 'number'
+
   useEffect(() => {
+    if (typeof forcedProgramId === 'number') {
+      setSelectedProgramId(forcedProgramId)
+    }
+  }, [forcedProgramId])
+
+  useEffect(() => {
+    if (programLocked) return
     if (selectedProgramId || programs.length === 0) return
     setSelectedProgramId(programs[0].id)
-  }, [programs, selectedProgramId])
+  }, [programLocked, programs, selectedProgramId])
 
   const subjectMap = useMemo(() => {
     const map = new Map<number, Subject>()
@@ -348,16 +362,18 @@ export function CurriculumGraph() {
             </Group>
           ) : null}
         </Stack>
-        <Select
-          label="Programa"
-          placeholder="Selecciona un programa"
-          data={programOptions}
-          value={selectedProgramId ? String(selectedProgramId) : null}
-          onChange={(value) => setSelectedProgramId(value ? Number(value) : null)}
-          searchable
-          nothingFoundMessage="Sin resultados"
-          style={{ minWidth: 260 }}
-        />
+        {!hideProgramSelector && !programLocked ? (
+          <Select
+            label="Programa"
+            placeholder="Selecciona un programa"
+            data={programOptions}
+            value={selectedProgramId ? String(selectedProgramId) : null}
+            onChange={(value) => setSelectedProgramId(value ? Number(value) : null)}
+            searchable
+            nothingFoundMessage="Sin resultados"
+            style={{ minWidth: 260 }}
+          />
+        ) : null}
       </Group>
 
       <Group gap="md">

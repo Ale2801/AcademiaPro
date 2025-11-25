@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionIcon, Card, Group, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
+import { ActionIcon, Button, Card, Group, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
 import {
   IconAward,
   IconBuilding,
@@ -10,6 +10,7 @@ import {
   IconClipboardList,
   IconClockHour4,
   IconDatabase,
+  IconInfoCircle,
   IconRefresh,
   IconSchool,
   IconUsersGroup,
@@ -21,6 +22,7 @@ import type { Section } from './admin/types'
 import GlobalScheduleOptimizer from './components/GlobalScheduleOptimizer'
 import SchedulePlanner from './components/SchedulePlanner'
 import CurriculumGraph from './components/CurriculumGraph'
+import OptimizerOnboardingGuide from './components/OptimizerOnboardingGuide'
 
 export const crudSections: Section[] = [
   {
@@ -362,6 +364,7 @@ export function Admin() {
   const isPlanner = active === plannerTabKey
   const isGlobalPlanner = active === globalPlannerTabKey
   const isCurriculumGraph = active === curriculumGraphTabKey
+  const [introOpen, setIntroOpen] = useState(false)
 
   useEffect(() => {
     const nextTab = deriveTabFromSearch(location.search)
@@ -389,15 +392,24 @@ export function Admin() {
 
   return (
     <Stack gap="xl">
-      <Stack gap="xs">
-        <Text size="xs" tt="uppercase" c="dimmed" fw={600}>
-          Centro de datos maestros
-        </Text>
-        <Title order={2}>Panel administrativo avanzado</Title>
-        <Text size="sm" c="dimmed">
-          Orquesta los catálogos centrales de la institución y mantén la coherencia visual con la nueva intranet.
-        </Text>
-      </Stack>
+      <Group justify="space-between" align="flex-start">
+        <Stack gap="xs">
+          <Text size="xs" tt="uppercase" c="dimmed" fw={600}>
+            Centro de datos maestros
+          </Text>
+          <Title order={2}>Panel administrativo avanzado</Title>
+          <Text size="sm" c="dimmed">
+            Orquesta los catálogos centrales de la institución y mantén la coherencia visual con la nueva intranet.
+          </Text>
+        </Stack>
+        <Button
+          variant="light"
+          leftSection={<IconInfoCircle size={16} />}
+          onClick={() => setIntroOpen(true)}
+        >
+          Introducción al optimizador
+        </Button>
+      </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
         {quickStats.map((stat) => (
@@ -446,6 +458,12 @@ export function Admin() {
       ) : (
         current && <CrudSection section={current} />
       )}
+      <OptimizerOnboardingGuide
+        opened={introOpen}
+        onClose={() => setIntroOpen(false)}
+        onNavigateToSection={(sectionKey) => handleTabChange(sectionKey)}
+        onNavigateToOptimizer={() => handleTabChange(globalPlannerTabKey)}
+      />
     </Stack>
   )
 }

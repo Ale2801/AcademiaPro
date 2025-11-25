@@ -25,7 +25,7 @@ class SubjectOutput(SubjectBase, table=False):
 
 
 @router.get("/", response_model=List[SubjectOutput])
-def list_subjects(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def list_subjects(session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     subjects = session.exec(select(Subject)).all()
     return _build_subject_collection(session, subjects)
 
@@ -46,7 +46,7 @@ def create_subject(payload: SubjectInput, session=Depends(get_session), user=Dep
 
 
 @router.get("/{subject_id}", response_model=SubjectOutput)
-def get_subject(subject_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def get_subject(subject_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     obj = session.get(Subject, subject_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Asignatura no encontrada")

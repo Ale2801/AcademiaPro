@@ -93,6 +93,8 @@ class User(SQLModel, table=True):
     hashed_password: str
     role: str = Field(index=True)  # valores permitidos: admin, coordinator, teacher, student
     is_active: bool = Field(default=True)
+    must_change_password: bool = Field(default=False, nullable=False)
+    profile_image: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
     # Datos personales y de contacto
     phone: Optional[str] = None
     secondary_email: Optional[str] = None

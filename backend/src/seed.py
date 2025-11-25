@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, List
 
 from sqlmodel import Session, select
 
-from .db import engine
+from . import db
 from .models import (
     Attendance,
     AppSetting,
@@ -42,10 +42,14 @@ DEFAULT_COORDINATOR_PASSWORD = "coordinador123"
 DEFAULT_COORDINATOR_NAME = "Coordinación Académica"
 
 
-def ensure_default_admin(session: Optional[Session] = None) -> User:
-    """Create a default admin user for local development if none exists."""
+def ensure_default_admin(
+    session: Optional[Session] = None,
+    *,
+    force_password_reset: Optional[bool] = None,
+) -> User:
+    """Create a default admin user if none exists and optionally require/clear a password reset."""
     owns_session = session is None
-    session = session or Session(engine)
+    session = session or Session(db.engine)
     try:
         existing = session.exec(select(User).where(User.email == DEFAULT_ADMIN_EMAIL)).first()
         if existing:
@@ -59,6 +63,12 @@ def ensure_default_admin(session: Optional[Session] = None) -> User:
             if not existing.is_active:
                 existing.is_active = True
                 updated = True
+            if force_password_reset is True and not existing.must_change_password:
+                existing.must_change_password = True
+                updated = True
+            if force_password_reset is False and existing.must_change_password:
+                existing.must_change_password = False
+                updated = True
             if updated:
                 session.add(existing)
                 session.commit()
@@ -70,6 +80,7 @@ def ensure_default_admin(session: Optional[Session] = None) -> User:
             hashed_password=get_password_hash(DEFAULT_ADMIN_PASSWORD),
             role="admin",
             is_active=True,
+            must_change_password=bool(force_password_reset),
         )
         session.add(user)
         session.commit()
@@ -83,7 +94,7 @@ def ensure_default_admin(session: Optional[Session] = None) -> User:
 def ensure_default_coordinator(session: Optional[Session] = None) -> User:
     """Create an academic coordinator account to operate scheduling workflows."""
     owns_session = session is None
-    session = session or Session(engine)
+    session = session or Session(db.engine)
     try:
         existing = session.exec(select(User).where(User.email == DEFAULT_COORDINATOR_EMAIL)).first()
         if existing:
@@ -121,7 +132,7 @@ def ensure_default_coordinator(session: Optional[Session] = None) -> User:
 def ensure_app_settings(session: Optional[Session] = None) -> None:
     """Guarantee that the base application settings exist."""
     owns_session = session is None
-    session = session or Session(engine)
+    session = session or Session(db.engine)
     try:
         _ensure_app_settings(session)
     finally:
@@ -131,8 +142,8 @@ def ensure_app_settings(session: Optional[Session] = None) -> None:
 
 def ensure_demo_data() -> None:
     """Populate the main catalog tables with deterministic demo data for the UI."""
-    with Session(engine) as session:
-        ensure_default_admin(session)
+    with Session(db.engine) as session:
+        ensure_default_admin(session, force_password_reset=False)
         ensure_default_coordinator(session)
         ensure_app_settings(session)
 

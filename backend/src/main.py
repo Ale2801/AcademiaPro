@@ -2,19 +2,33 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
+from .config import settings
 from .db import init_db
-from .seed import ensure_default_admin, ensure_demo_data
+from .seed import ensure_default_admin, ensure_demo_data, ensure_app_settings
 from .routers import auth, students
 from .routers import schedule, teachers, subjects, rooms, courses, users
-from .routers import enrollments, evaluations, grades, attendance, timeslots, course_schedules, programs, program_semesters, settings
+from .routers import (
+    enrollments,
+    evaluations,
+    grades,
+    attendance,
+    timeslots,
+    course_schedules,
+    programs,
+    program_semesters,
+    settings as settings_router,
+)
 from .routers import student_schedule
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    ensure_default_admin()
-    ensure_demo_data()
+    if settings.is_production:
+        ensure_default_admin(force_password_reset=True)
+        ensure_app_settings()
+    else:
+        ensure_demo_data()
     yield
 
 
@@ -49,7 +63,7 @@ app.include_router(timeslots.router)
 app.include_router(course_schedules.router)
 app.include_router(programs.router)
 app.include_router(program_semesters.router)
-app.include_router(settings.router)
+app.include_router(settings_router.router)
 
 
 @app.get("/")

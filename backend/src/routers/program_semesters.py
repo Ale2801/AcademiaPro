@@ -27,7 +27,7 @@ class ProgramSemesterUpdate(BaseModel):
 
 
 @router.get("/", response_model=List[ProgramSemester])
-def list_program_semesters(program_id: int | None = None, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def list_program_semesters(program_id: int | None = None, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     stmt = select(ProgramSemester)
     if program_id is not None:
         stmt = stmt.where(ProgramSemester.program_id == program_id)
@@ -46,7 +46,7 @@ def create_program_semester(payload: ProgramSemester, session=Depends(get_sessio
 
 
 @router.get("/{semester_id}", response_model=ProgramSemester)
-def get_program_semester(semester_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher"))):
+def get_program_semester(semester_id: int, session=Depends(get_session), user=Depends(require_roles("admin", "coordinator", "teacher", "student"))):
     obj = session.get(ProgramSemester, semester_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Semestre de programa no encontrado")

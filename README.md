@@ -44,7 +44,7 @@ docker compose up --build
 - Documentación interactiva en `http://localhost:8000/docs`
 - Frontend en `http://localhost:5173` (cuando se ejecute `npm run dev` en otra terminal)
 
-La base se siembra automáticamente en el arranque (usuario admin `admin@academiapro.dev` / `admin123` y catálogos demo).
+En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario admin `admin@academiapro.dev` / `admin123`, coordinador y catálogos demo). Si estableces `APP_ENV=prod` en un archivo `.env` en la raíz del repositorio, el arranque omite los datos demo y solo crea el administrador por defecto con una contraseña temporal que debe ser cambiada tras el primer inicio de sesión.
 
 ## Configuración para desarrollo local
 
@@ -73,6 +73,14 @@ La base se siembra automáticamente en el arranque (usuario admin `admin@academi
 - `SECRET_KEY`: clave JWT; se recomienda anular la default en producción.
 - `ACCESS_TOKEN_EXPIRE_MINUTES`: minutos de validez del token (opcional).
 - `DEBUG`: activa modo debug (`true` por defecto en dev).
+- `APP_ENV`: controla si la app corre en `dev` (siembra datos demo) o `prod` (solo crea el admin). Puedes definirlo en un archivo `.env` en la raíz y se cargará automáticamente con `python-dotenv`.
+- `.env`: crea un archivo `.env` junto al `README.md` con pares `CLAVE=valor` para fijar variables. Ejemplo para producción:
+  ```
+  APP_ENV=prod
+  SECRET_KEY=tu-clave-segura
+  DATABASE_URL=postgresql://user:pass@db:5432/academiapro
+  ```
+  En este modo se creará únicamente el administrador demo y se le solicitará forzar el cambio de contraseña al autenticarse.
 - Frontend: `VITE_API_BASE` para apuntar a una URL distinta de `/api`.
 
 El backend expone un endpoint `/settings/public` para ajustes visibles en el frontend (branding, idioma, zona horaria, etc.). Los valores iniciales se controlan mediante `src/seed.py`.
@@ -94,6 +102,7 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
 ### Endpoints destacados
 - `POST /auth/token`: login y obtención de JWT.
 - `POST /auth/signup`: creación de usuarios (rol configurable).
+- `POST /auth/change-password`: permite que el usuario autenticado actualice su contraseña cuando `must_change_password` es `true`.
 - `GET/POST/PUT/DELETE /settings`: CRUD de ajustes institucionales (solo admins).
 - `GET /settings/public`: ajustes visibles para clientes.
 - `POST /schedule/optimize`: ejecuta el optimizador greedy/OR-Tools y retorna propuesta.
@@ -175,3 +184,5 @@ frontend/
 - Coordinador académico: `coordinador@academiapro.dev` / `coordinador123`
 
 Con estos credenciales puedes experimentar con el panel administrativo, modificar ajustes de marca y generar propuestas de horarios desde la vista del optimizador.
+
+> Nota: En entornos configurados con `APP_ENV=prod` solo se aprovisiona el administrador demo y el sistema le exigirá cambiar su contraseña temporal (`admin123`) antes de continuar.

@@ -268,4 +268,15 @@ describe('Admin CRUD básico', () => {
     confirmSpy.mockRestore()
   })
 
+  it('muestra la introducción para el optimizador global', async () => {
+    renderWithMantine(<Admin />)
+
+    const introButton = await screen.findByRole('button', { name: /Introducción al optimizador/i })
+    expect(introButton).toBeInTheDocument()
+    await userEvent.click(introButton)
+
+    await screen.findByText('Introducción al optimizador')
+    expect(await screen.findByText('Diseña la estructura académica')).toBeInTheDocument()
+  })
+
 })

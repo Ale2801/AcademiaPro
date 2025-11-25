@@ -41,8 +41,13 @@ import {
   IconUsersGroup,
 } from '@tabler/icons-react'
 import { api } from '../../lib/api'
+import { useLocation, useNavigate } from 'react-router-dom'
 import ScheduleTimeline, { ScheduleEntry } from './ScheduleTimeline'
 import ScheduleDesigner from './ScheduleDesigner'
+
+type SchedulePlannerProps = {
+  onCourseFullyScheduled?: (courseId: number) => void
+}
 
 const DAY_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -218,7 +223,9 @@ function formatMinutesLabel(value: number) {
   return parts.join(' ')
 }
 
-export default function SchedulePlanner() {
+export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlannerProps = {}) {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [optimizerLoading, setOptimizerLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -247,6 +254,8 @@ export default function SchedulePlanner() {
 
   const [selectedCourseForStudents, setSelectedCourseForStudents] = useState<string | null>(null)
   const [selectedStudents, setSelectedStudents] = useState<string[]>([])
+  const [highlightCourseId, setHighlightCourseId] = useState<number | null>(null)
+  const [trackedCourseId, setTrackedCourseId] = useState<number | null>(null)
 
   const [dialog, setDialog] = useState<PlannerDialog | null>(null)
   const [dialogRoom, setDialogRoom] = useState<string | null>(null)
@@ -259,6 +268,19 @@ export default function SchedulePlanner() {
 
   const theme = useMantineTheme()
   const { colorScheme } = useMantineColorScheme()
+
+  type PlannerQueryState = {
+    programId: number | null
+    semesterId: number | null
+    highlightCourseId: number | null
+    pulse: string | null
+  }
+  const [plannerQuery, setPlannerQuery] = useState<PlannerQueryState>({
+    programId: null,
+    semesterId: null,
+    highlightCourseId: null,
+    pulse: null,
+  })
 
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user.full_name])), [users])
   const subjectMap = useMemo(() => new Map(subjects.map((subject) => [subject.id, subject.name])), [subjects])
@@ -278,6 +300,63 @@ export default function SchedulePlanner() {
       setSelectedStudents([])
     }
   }, [selectedCourseForStudents, courseStudentMap])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const parseNumber = (value: string | null) => {
+      if (!value) return null
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+    setPlannerQuery({
+      programId: parseNumber(params.get('plannerProgram')),
+      semesterId: parseNumber(params.get('plannerSemester')),
+      highlightCourseId: parseNumber(params.get('highlightCourse')),
+      pulse: params.get('highlightPulse'),
+    })
+  }, [location.search])
+
+  useEffect(() => {
+    if (!plannerQuery.programId) return
+    if (!programs.some((program) => program.id === plannerQuery.programId)) return
+    const target = String(plannerQuery.programId)
+    if (selectedProgram !== target) {
+      setSelectedProgram(target)
+    }
+  }, [plannerQuery.programId, programs, selectedProgram])
+
+  useEffect(() => {
+    if (!plannerQuery.semesterId) return
+    if (!programSemesters.some((semester) => semester.id === plannerQuery.semesterId)) return
+    const target = String(plannerQuery.semesterId)
+    if (selectedSemester !== target) {
+      setSelectedSemester(target)
+    }
+  }, [plannerQuery.semesterId, programSemesters, selectedSemester])
+
+  useEffect(() => {
+    if (!plannerQuery.highlightCourseId) return
+    setHighlightCourseId(plannerQuery.highlightCourseId)
+    setTrackedCourseId(plannerQuery.highlightCourseId)
+    const params = new URLSearchParams(location.search)
+    if (params.has('highlightCourse')) {
+      params.delete('highlightCourse')
+      params.delete('highlightPulse')
+      navigate({ pathname: location.pathname, search: params.toString(), hash: location.hash }, { replace: true })
+    }
+  }, [plannerQuery.highlightCourseId, plannerQuery.pulse, location.search, location.pathname, location.hash, navigate])
+
+  const handleHighlightConsumed = useCallback(() => {
+    setHighlightCourseId(null)
+  }, [])
+
+  useEffect(() => {
+    if (!trackedCourseId || !onCourseFullyScheduled) return
+    const hasAssignment = schedule.some((entry) => entry.course_id === trackedCourseId)
+    if (!hasAssignment) return
+    onCourseFullyScheduled(trackedCourseId)
+    setTrackedCourseId(null)
+  }, [trackedCourseId, schedule, onCourseFullyScheduled])
 
   const loadCatalogs = useCallback(async () => {
     setLoading(true)
@@ -1556,6 +1635,8 @@ export default function SchedulePlanner() {
           onEditAssignment={handleAssignmentEdit}
           onDeleteAssignment={handleAssignmentDelete}
           loading={loading || saving}
+          highlightCourseId={highlightCourseId}
+          onHighlightConsumed={handleHighlightConsumed}
         />
       </Stack>
 

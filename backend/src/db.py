@@ -50,6 +50,7 @@ def init_db():
     _ensure_column(engine, "program", "is_active", "is_active BOOLEAN NOT NULL DEFAULT 1")
     # Estado del semestre académico para instalaciones sin migración
     _ensure_column(engine, "programsemester", "state", "state VARCHAR(20) DEFAULT 'planned'")
+    _ensure_column(engine, "user", "profile_image", "profile_image TEXT")
     try:
         with engine.begin() as connection:
             connection.execute(text("UPDATE programsemester SET state = 'planned' WHERE state IS NULL"))

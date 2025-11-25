@@ -3,6 +3,7 @@ import React from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MantineProvider } from '@mantine/core'
 import { vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 
 import SchedulePlanner from './SchedulePlanner'
 
@@ -187,11 +188,13 @@ function setupApiMocks() {
   deleteMock.mockResolvedValue({ data: {} })
 }
 
-function renderPlanner() {
+function renderPlanner(initialEntries: string[] = ['/app/schedule-planner']) {
   return render(
-    <MantineProvider>
-      <SchedulePlanner />
-    </MantineProvider>
+    <MemoryRouter initialEntries={initialEntries}>
+      <MantineProvider>
+        <SchedulePlanner />
+      </MantineProvider>
+    </MemoryRouter>
   )
 }
 
@@ -484,11 +487,7 @@ describe('SchedulePlanner drag & drop experience', () => {
     })
 
     await act(async () => {
-      render(
-        <MantineProvider>
-          <SchedulePlanner />
-        </MantineProvider>,
-      )
+      renderPlanner()
     })
 
     await waitFor(() => expect(screen.getByText(baseCourseLabel)).toBeInTheDocument())

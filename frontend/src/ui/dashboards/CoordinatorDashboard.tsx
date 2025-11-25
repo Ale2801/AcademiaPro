@@ -11,15 +11,17 @@ import {
 	SimpleGrid,
 	Stack,
 	Table,
+	Tabs,
 	Text,
 	Title,
 } from '@mantine/core'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
 	IconAlertCircle,
 	IconCalendarStats,
 	IconChalkboard,
 	IconClipboardList,
+	IconListCheck,
 	IconRefresh,
 	IconSchool,
 	IconUsersGroup,
@@ -28,10 +30,45 @@ import {
 import DashboardLayout from './DashboardLayout'
 import { useAuth } from '../../lib/auth'
 import { api } from '../../lib/api'
+import SchedulePlanner from '../components/SchedulePlanner'
+import GlobalScheduleOptimizer from '../components/GlobalScheduleOptimizer'
+import { CrudSection } from '../admin/CrudSection'
+import { crudSections as adminCrudSections } from '../Admin'
+
+type ManagementTabConfig =
+	| { key: string; label: string; icon: React.ComponentType<{ size?: number | string }>; type: 'crud'; section: (typeof adminCrudSections)[number] }
+	| { key: 'planner' | 'global-optimizer'; label: string; icon: React.ComponentType<{ size?: number | string }>; type: 'planner' | 'optimizer' }
+
+const coordinatorSectionKeys = new Set([
+	'programs',
+	'subjects',
+	'courses',
+	'students',
+	'teachers',
+	'rooms',
+	'enrollments',
+])
+
+const coordinatorManagementSections = adminCrudSections.filter((section) => coordinatorSectionKeys.has(section.key))
+
+const managementTabs: ManagementTabConfig[] = [
+	...coordinatorManagementSections.map((section) => ({ key: section.key, label: section.title, icon: section.icon, type: 'crud' as const, section })),
+	{ key: 'planner', label: 'Planificador por programa', icon: IconClipboardList, type: 'planner' },
+	{ key: 'global-optimizer', label: 'Optimizador global', icon: IconCalendarStats, type: 'optimizer' },
+]
 
 type Program = { id: number; name: string; code: string }
 type ProgramSemester = { id: number; program_id: number }
-type Course = { id: number; program_semester_id: number; term?: string | null; group?: string | null }
+type Subject = { id: number; name: string; code: string }
+type Course = {
+	id: number
+	program_semester_id: number
+	subject_id?: number | null
+	subject?: { name?: string | null } | null
+	term?: string | null
+	group?: string | null
+	teacher_id?: number | null
+}
 type Teacher = { id: number }
 type Student = { id: number; program_id: number }
 type ScheduleSlot = {
@@ -46,31 +83,65 @@ type ScheduleSlot = {
 	program_semester_label?: string | null
 }
 
-const dayLabels = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-
 export default function CoordinatorDashboard() {
 	const { logout } = useAuth()
 	const navigate = useNavigate()
+	const location = useLocation()
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const [programs, setPrograms] = useState<Program[]>([])
 	const [programSemesters, setProgramSemesters] = useState<ProgramSemester[]>([])
 	const [courses, setCourses] = useState<Course[]>([])
+	const [subjects, setSubjects] = useState<Subject[]>([])
 	const [teachers, setTeachers] = useState<Teacher[]>([])
 	const [students, setStudents] = useState<Student[]>([])
 	const [schedule, setSchedule] = useState<ScheduleSlot[]>([])
+	const [managementTab, setManagementTab] = useState<string | null>(managementTabs[0]?.key ?? null)
+
+	const handleManagementTabChange = useCallback((value: string | null) => {
+		if (!value) return
+		setManagementTab(value)
+		const params = new URLSearchParams(location.search)
+		params.set('catalog', value)
+		navigate({ pathname: location.pathname, search: params.toString(), hash: '#catalogos' }, { replace: true })
+	}, [location.pathname, location.search, navigate])
+
+	const handleOperationalTaskNavigation = useCallback((target: string) => {
+		if (typeof window === 'undefined') return
+		const hashIndex = target.indexOf('#')
+		const searchPart = hashIndex === -1 ? target : target.slice(0, hashIndex)
+		const hash = hashIndex === -1 ? '' : target.slice(hashIndex)
+		const nextSearch = searchPart.startsWith('?') ? searchPart : location.search
+		navigate({ pathname: location.pathname, search: nextSearch, hash }, { replace: false })
+		if (!hash) return
+		const elementId = hash.replace('#', '')
+		if (!elementId) return
+		const delay = hash.includes('catalogos') ? 260 : 140
+		window.setTimeout(() => {
+			document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		}, delay)
+	}, [location.pathname, location.search, navigate])
+
+	useEffect(() => {
+		const params = new URLSearchParams(location.search)
+		const requestedTab = params.get('catalog')
+		if (requestedTab && requestedTab !== managementTab && managementTabs.some((tab) => tab.key === requestedTab)) {
+			setManagementTab(requestedTab)
+		}
+	}, [location.search, managementTab])
 
 	const loadOverview = useCallback(async () => {
 		setLoading(true)
 		setError(null)
 		try {
-			const [programRes, semesterRes, courseRes, teacherRes, studentRes, scheduleRes] = await Promise.all([
+			const [programRes, semesterRes, courseRes, teacherRes, studentRes, scheduleRes, subjectRes] = await Promise.all([
 				api.get<Program[]>('/programs/'),
 				api.get<ProgramSemester[]>('/program-semesters/'),
 				api.get<Course[]>('/courses/'),
 				api.get<Teacher[]>('/teachers/'),
 				api.get<Student[]>('/students/'),
 				api.get<ScheduleSlot[]>('/schedule/overview'),
+				api.get<Subject[]>('/subjects/'),
 			])
 			setPrograms(programRes.data)
 			setProgramSemesters(semesterRes.data)
@@ -78,6 +149,7 @@ export default function CoordinatorDashboard() {
 			setTeachers(teacherRes.data)
 			setStudents(studentRes.data)
 			setSchedule(scheduleRes.data)
+			setSubjects(subjectRes.data)
 		} catch (e: any) {
 			const detail = e?.response?.data?.detail || e?.message || 'No se pudo cargar el resumen académico'
 			setError(detail)
@@ -98,11 +170,21 @@ export default function CoordinatorDashboard() {
 		return map
 	}, [programSemesters])
 
+	const scheduledCourseIds = useMemo(() => new Set<number>(schedule.map((slot) => slot.course_id)), [schedule])
+
+	const subjectLookup = useMemo(() => {
+		const map = new Map<number, string>()
+		for (const subject of subjects) {
+			const label = subject.name || subject.code || `Asignatura #${subject.id}`
+			map.set(subject.id, label)
+		}
+		return map
+	}, [subjects])
+
 	const unassignedCourses = useMemo(() => {
 		if (courses.length === 0) return 0
-		const scheduledIds = new Set<number>(schedule.map((slot) => slot.course_id))
-		return courses.filter((course) => !scheduledIds.has(course.id)).length
-	}, [courses, schedule])
+		return courses.filter((course) => !scheduledCourseIds.has(course.id)).length
+	}, [courses, scheduledCourseIds])
 
 	const assignedCourses = courses.length - unassignedCourses
 	const coveragePercent = courses.length === 0 ? 0 : Math.round((assignedCourses / courses.length) * 100)
@@ -140,18 +222,96 @@ export default function CoordinatorDashboard() {
 			.sort((a, b) => b.count - a.count)
 	}, [schedule])
 
-	const schedulePreview = useMemo(() => {
-		const items = [...schedule]
-		items.sort((a, b) => {
-			const dayA = typeof a.day_of_week === 'number' ? a.day_of_week : 7
-			const dayB = typeof b.day_of_week === 'number' ? b.day_of_week : 7
-			if (dayA !== dayB) return dayA - dayB
-			const timeA = a.start_time ? Number(a.start_time.replace(':', '')) : 0
-			const timeB = b.start_time ? Number(b.start_time.replace(':', '')) : 0
-			return timeA - timeB
-		})
-		return items.slice(0, 6)
-	}, [schedule])
+	const coursesWithoutTeacher = useMemo(() => courses.filter((course) => !course.teacher_id), [courses])
+
+	const programsMissingSemesters = useMemo(() => {
+		if (programs.length === 0) return 0
+		const programIdsWithSemesters = new Set(programSemesters.map((semester) => semester.program_id))
+		return programs.filter((program) => !programIdsWithSemesters.has(program.id)).length
+	}, [programSemesters, programs])
+
+	const coordinatorTasks = useMemo(() => {
+		const tasks: { label: string; description: string; count: number; target: string }[] = []
+		if (coursesWithoutTeacher.length > 0) {
+			tasks.push({
+				label: 'Asignar docentes',
+				description: 'Cursos sin profesor responsable',
+				count: coursesWithoutTeacher.length,
+				target: '?catalog=teachers#catalogos',
+			})
+		}
+		if (unassignedCourses > 0) {
+			tasks.push({
+				label: 'Definir horarios',
+				description: 'Cursos planificados sin bloque asignado',
+				count: unassignedCourses,
+				target: '?catalog=planner#catalogos',
+			})
+		}
+		if (programsMissingSemesters > 0) {
+			tasks.push({
+				label: 'Completar malla',
+				description: 'Programas activos sin semestres definidos',
+				count: programsMissingSemesters,
+				target: '?catalog=programs#catalogos',
+			})
+		}
+		return tasks
+	}, [coursesWithoutTeacher.length, programsMissingSemesters, unassignedCourses])
+
+	const pendingCourses = useMemo(() => {
+		const entries: {
+			id: number
+			label: string
+			meta: string | null
+			needsTeacher: boolean
+			needsSchedule: boolean
+			programId: number | null
+			semesterId: number | null
+		}[] = []
+		for (const course of courses) {
+			const needsTeacher = !course.teacher_id
+			const needsSchedule = !scheduledCourseIds.has(course.id)
+			if (!needsTeacher && !needsSchedule) continue
+			const subjectName =
+				course.subject?.name ||
+				(course.subject_id ? subjectLookup.get(course.subject_id) : undefined) ||
+				`Curso ${course.id}`
+			const metaParts: string[] = []
+			if (course.term) metaParts.push(course.term)
+			if (course.group) metaParts.push(`Grupo ${course.group}`)
+			const programId = semesterProgramLookup.get(course.program_semester_id) ?? null
+			const semesterId = course.program_semester_id ?? null
+			entries.push({
+				id: course.id,
+				label: `${subjectName} (ID ${course.id})`,
+				meta: metaParts.length ? metaParts.join(' · ') : null,
+				needsTeacher,
+				needsSchedule,
+				programId,
+				semesterId,
+			})
+		}
+		return entries.slice(0, 5)
+	}, [courses, scheduledCourseIds, semesterProgramLookup, subjectLookup])
+
+	const handlePendingCourseSelect = useCallback((entry: { id: number; programId: number | null; semesterId: number | null }) => {
+		const params = new URLSearchParams(location.search)
+		params.set('catalog', 'planner')
+		if (entry.programId) params.set('plannerProgram', String(entry.programId))
+		if (entry.semesterId) params.set('plannerSemester', String(entry.semesterId))
+		params.set('highlightCourse', String(entry.id))
+		params.set('highlightPulse', String(Date.now()))
+		navigate({ pathname: location.pathname, search: params.toString(), hash: '#catalogos' })
+		if (typeof window === 'undefined') return
+		window.setTimeout(() => {
+			document.getElementById('catalogos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		}, 320)
+	}, [location.pathname, location.search, navigate])
+
+	const handlePlannerCourseCovered = useCallback(() => {
+		void loadOverview()
+	}, [loadOverview])
 
 	const summaryCards = useMemo(
 		() => [
@@ -243,60 +403,71 @@ export default function CoordinatorDashboard() {
 					</Stack>
 				</Card>
 
-				<SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg" id="horarios">
-					<Card withBorder radius="md" padding="lg">
+				<SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+					<Card withBorder radius="md" padding="lg" id="tareas">
 						<Group justify="space-between" align="center" mb="md">
 							<div>
-								<Title order={4}>Bloques más próximos</Title>
-								<Text size="sm" c="dimmed">Vista rápida de las sesiones programadas</Text>
+								<Title order={4}>Alertas operativas</Title>
+								<Text size="sm" c="dimmed">Prioriza asignaciones críticas del plan académico</Text>
 							</div>
-							<Badge color="dark" variant="light">{schedule.length} bloques</Badge>
+							<Badge color={coordinatorTasks.length ? 'orange' : 'teal'} variant="light">
+								{coordinatorTasks.length ? `${coordinatorTasks.length} pendientes` : 'Todo al día'}
+							</Badge>
 						</Group>
-						{loading && schedule.length === 0 ? (
-							<Group justify="center" py="lg">
-								<Loader color="dark" />
-							</Group>
-						) : (
-							<Table highlightOnHover withTableBorder>
-								<Table.Thead>
-									<Table.Tr>
-										<Table.Th>Día</Table.Th>
-										<Table.Th>Horario</Table.Th>
-										<Table.Th>Curso</Table.Th>
-										<Table.Th>Docente</Table.Th>
-										<Table.Th>Aula</Table.Th>
-									</Table.Tr>
-								</Table.Thead>
-								<Table.Tbody>
-									{schedulePreview.map((slot) => {
-										const dayIndex = typeof slot.day_of_week === 'number' ? slot.day_of_week : null
-										const dayLabel = dayIndex !== null ? (dayLabels[dayIndex] || `Día ${dayIndex + 1}`) : 'Sin día'
-										return (
-											<Table.Tr key={`${slot.course_id}-${slot.start_time}-${slot.room_code}`}>
+						<Stack gap="sm">
+							{coordinatorTasks.length === 0 && (
+								<Text size="sm" c="dimmed">No hay alertas activas. Continúa monitoreando la cobertura académica.</Text>
+							)}
+							{coordinatorTasks.map((task) => (
+								<Card key={task.label} withBorder radius="md" padding="sm">
+									<Group justify="space-between" align="center">
+										<div>
+											<Text fw={600}>{task.label}</Text>
+											<Text size="xs" c="dimmed">{task.description}</Text>
+										</div>
+											<Group gap="xs">
+												<Badge color="red" variant="light">{task.count}</Badge>
+												<Button
+													variant="light"
+													size="xs"
+													onClick={() => handleOperationalTaskNavigation(task.target)}
+												>
+													Gestionar
+												</Button>
+											</Group>
+									</Group>
+								</Card>
+							))}
+						</Stack>
+						{pendingCourses.length > 0 && (
+							<Card withBorder radius="md" padding="sm" mt="md">
+								<Group gap="xs" mb="sm">
+									<IconListCheck size={18} />
+									<Text fw={600}>Cursos prioritarios</Text>
+								</Group>
+								<Table withRowBorders={false} verticalSpacing="xs">
+									<Table.Tbody>
+										{pendingCourses.map((course) => (
+											<Table.Tr
+												key={course.id}
+												onClick={() => handlePendingCourseSelect(course)}
+												style={{ cursor: 'pointer' }}
+											>
 												<Table.Td>
-													<Badge color="indigo" variant="light">{dayLabel}</Badge>
+													<Text fw={500}>{course.label}</Text>
+													{course.meta && (
+														<Text size="xs" c="dimmed">{course.meta}</Text>
+													)}
+													<Group gap="xs">
+														{course.needsTeacher && <Badge color="yellow" variant="light">Sin docente</Badge>}
+														{course.needsSchedule && <Badge color="indigo" variant="light">Sin horario</Badge>}
+													</Group>
 												</Table.Td>
-												<Table.Td>{slot.start_time} - {slot.end_time}</Table.Td>
-												<Table.Td>
-													<Stack gap={2}>
-														<Text fw={500}>{slot.course_name || `Curso ${slot.course_id}`}</Text>
-														{slot.program_semester_label && <Text size="xs" c="dimmed">{slot.program_semester_label}</Text>}
-													</Stack>
-												</Table.Td>
-												<Table.Td>{slot.teacher_name || 'Sin docente'}</Table.Td>
-												<Table.Td>{slot.room_code || 'Por asignar'}</Table.Td>
 											</Table.Tr>
-										)
-									})}
-									{schedulePreview.length === 0 && (
-										<Table.Tr>
-											<Table.Td colSpan={5}>
-												<Text size="sm" c="dimmed" ta="center">Aún no hay bloques programados para mostrar.</Text>
-											</Table.Td>
-										</Table.Tr>
-									)}
-								</Table.Tbody>
-							</Table>
+										))}
+									</Table.Tbody>
+								</Table>
+							</Card>
 						)}
 					</Card>
 
@@ -358,6 +529,47 @@ export default function CoordinatorDashboard() {
 						)}
 					</SimpleGrid>
 				</Card>
+
+				{managementTabs.length > 0 && (
+					<Card withBorder radius="md" padding="lg" id="catalogos">
+						<Stack gap="md">
+							<Group justify="space-between" align="flex-start">
+								<div>
+									<Title order={4}>Gestión operativa</Title>
+									<Text size="sm" c="dimmed">Administra catálogos, planificadores y herramientas del coordinador en un solo lugar</Text>
+								</div>
+								<Badge color="dark" variant="light">Catálogos conectados</Badge>
+							</Group>
+							<Tabs
+								value={managementTab ?? undefined}
+								onChange={handleManagementTabChange}
+								variant="outline"
+								keepMounted={false}
+							>
+								<Tabs.List style={{ flexWrap: 'wrap', gap: 8 }}>
+									{managementTabs.map((tab) => {
+										const IconComponent = tab.icon
+										return (
+											<Tabs.Tab key={tab.key} value={tab.key} leftSection={<IconComponent size={16} />}>
+												{tab.label}
+											</Tabs.Tab>
+										)
+									})}
+								</Tabs.List>
+								{managementTabs.map((tab) => (
+									<Tabs.Panel key={tab.key} value={tab.key} pt="md">
+										{managementTab === tab.key && tab.type === 'crud' && <CrudSection section={tab.section} />}
+										{managementTab === tab.key && tab.type === 'planner' && (
+											<SchedulePlanner onCourseFullyScheduled={handlePlannerCourseCovered} />
+										)}
+										{managementTab === tab.key && tab.type === 'optimizer' && <GlobalScheduleOptimizer />}
+									</Tabs.Panel>
+								))}
+							</Tabs>
+						</Stack>
+					</Card>
+				)}
+
 			</Stack>
 		</DashboardLayout>
 	)

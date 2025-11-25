@@ -9,6 +9,7 @@ def client():
     # Configurar SQLite de pruebas antes de importar la app
     test_db_path = os.path.abspath("test.db")
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
+    os.environ["APP_ENV"] = "dev"
 
     try:
         os.remove(test_db_path)
@@ -76,6 +77,20 @@ def admin_token(client: TestClient):
         "role": "admin"
     })
     res = client.post("/auth/token", data={"username": email, "password": "admin123"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert res.status_code == 200, res.text
+    return res.json()["access_token"]
+
+
+@pytest.fixture()
+def coordinator_token(client: TestClient):
+    email = "coordinator@test.com"
+    client.post("/auth/signup", json={
+        "email": email,
+        "full_name": "Coordinador Test",
+        "password": "coord123",
+        "role": "coordinator"
+    })
+    res = client.post("/auth/token", data={"username": email, "password": "coord123"}, headers={"Content-Type": "application/x-www-form-urlencoded"})
     assert res.status_code == 200, res.text
     return res.json()["access_token"]
 

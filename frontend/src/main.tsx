@@ -14,6 +14,7 @@ import TeacherDashboard from './ui/dashboards/TeacherDashboard'
 import StudentDashboard from './ui/dashboards/StudentDashboard'
 import StudentMatriculationDashboard from './ui/dashboards/StudentMatriculationDashboard'
 import StudentSchedulePlannerDashboard from './ui/dashboards/StudentSchedulePlannerDashboard'
+import StudentScheduleDashboard from './ui/dashboards/StudentScheduleDashboard'
 import ProgramDetailPage from './ui/programs/ProgramDetailPage'
 import TeacherDetailPage from './ui/teachers/TeacherDetailPage'
 import StudentDetailPage from './ui/students/StudentDetailPage'
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
 	{ path: '/dashboard/student', element: <StudentDashboard /> },
 	{ path: '/dashboard/student/matricula', element: <StudentMatriculationDashboard /> },
 	{ path: '/dashboard/student/planificador', element: <StudentSchedulePlannerDashboard /> },
+	{ path: '/dashboard/student/horario', element: <StudentScheduleDashboard /> },
 ])
 
 const root = createRoot(document.getElementById('root')!)
