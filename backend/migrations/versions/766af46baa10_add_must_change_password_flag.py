@@ -24,8 +24,8 @@ COLUMN_NAME = "must_change_password"
 
 def upgrade() -> None:
     with op.batch_alter_table(TABLE_NAME, recreate="auto") as batch_op:
-        batch_op.add_column(sa.Column(COLUMN_NAME, sa.Boolean(), nullable=False, server_default=sa.text("0")))
-    op.execute(sa.text(f"UPDATE \"{TABLE_NAME}\" SET {COLUMN_NAME} = 0 WHERE {COLUMN_NAME} IS NULL"))
+        batch_op.add_column(sa.Column(COLUMN_NAME, sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.execute(sa.text(f"UPDATE \"{TABLE_NAME}\" SET {COLUMN_NAME} = FALSE WHERE {COLUMN_NAME} IS NULL"))
     with op.batch_alter_table(TABLE_NAME, recreate="auto") as batch_op:
         batch_op.alter_column(COLUMN_NAME, server_default=None)
 

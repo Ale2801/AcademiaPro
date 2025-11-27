@@ -33,7 +33,7 @@ def upgrade() -> None:
             sa.Column('label', sa.String(length=255), nullable=True),
             sa.Column('description', sa.Text(), nullable=True),
             sa.Column('category', sa.String(length=255), nullable=True),
-            sa.Column('is_public', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+            sa.Column('is_public', sa.Boolean(), nullable=False, server_default=sa.text('false')),
             sa.PrimaryKeyConstraint('id')
         )
         has_appsetting = True
@@ -99,7 +99,7 @@ def upgrade() -> None:
     bind.execute(sa.text(
         """
         UPDATE programsemester
-        SET is_active = 1
+        SET is_active = TRUE
         WHERE is_active IS NULL
         """
     ))
@@ -188,16 +188,16 @@ def downgrade() -> None:
                    existing_type=sa.INTEGER(),
                    nullable=True)
         op.alter_column('schedulesupportrequest', 'handled',
-                   existing_type=sa.BOOLEAN(),
-                   server_default=sa.text('0'),
+               existing_type=sa.BOOLEAN(),
+               server_default=sa.text('false'),
                    existing_nullable=False)
         op.alter_column('schedulesupportrequest', 'created_at',
                    existing_type=sa.DATETIME(),
                    server_default=sa.text('(CURRENT_TIMESTAMP)'),
                    existing_nullable=False)
         op.alter_column('programsemester', 'is_active',
-                   existing_type=sa.BOOLEAN(),
-                   server_default=sa.text('1'),
+               existing_type=sa.BOOLEAN(),
+               server_default=sa.text('true'),
                    existing_nullable=False)
         op.drop_constraint(None, 'courseschedule', type_='foreignkey')
         op.create_foreign_key('courseschedule_program_semester_id_fkey', 'courseschedule', 'programsemester', ['program_semester_id'], ['id'], ondelete='SET NULL')

@@ -29,7 +29,7 @@ def upgrade() -> None:
             "program",
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         )
-        op.execute("UPDATE program SET is_active = 1")
+        op.execute("UPDATE program SET is_active = TRUE")
 
         if dialect_name != "sqlite":
             op.alter_column("program", "is_active", server_default=None)
