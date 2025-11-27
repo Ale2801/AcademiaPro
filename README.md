@@ -22,12 +22,23 @@ Sistema académico completo para gestionar catálogos, cursos y horarios con un 
 
 ## Características principales
 - Autenticación JWT con roles (`admin`, `teacher`, `student`) y guardas de acceso en routers.
+ - Autenticación JWT con roles (`admin`, `coordinator`, `teacher`, `student`) y guardas de acceso en routers.
 - CRUD completo de programas, asignaturas, cursos, docentes, estudiantes, matrículas, evaluaciones y asistencia.
 - Asignaturas con prerrequisitos configurables para reforzar el flujo de aprobación previo a cursar nuevas materias.
+- Gestión de perfiles personales con endpoints `/users/me` y `/users/me/avatar`, carga/validación de fotos en base64 y bandera `must_change_password` para obligar el primer cambio de contraseña a través de `/auth/change-password`.
 - Optimizador de horarios con granularidad de 15 minutos que respeta disponibilidad docente, restricciones de sala, recesos configurables, máximos de bloques consecutivos y límites diarios por programa.
 - Exportación de horarios (Excel/PDF) y guardado persistente de asignaciones.
 - Módulo de **Ajustes de Aplicación** (modelo `AppSetting`, endpoints `/settings`, seed con valores de branding y plataforma).
 - Frontend administrativo con vista global del optimizador, botón de aplicación de propuestas y persistencia de estado de la barra lateral.
+- Panel del coordinador con guía interactiva de onboarding, seguimiento de cobertura académica y atajos hacia el optimizador, además de un dashboard estudiantil centrado en la consulta del horario consolidado.
+
+## Roles y capacidades
+| Rol | Descripción | Interfaz principal |
+| --- | --- | --- |
+| **Administrador** | Configura ajustes institucionales, gestiona usuarios, programas, catálogos y aprueba cambios estructurales. Puede exportar horarios y forzar cambios de contraseña. | `AdminDashboard`, `ApplicationSettings`, CRUDs completos. |
+| **Coordinador** | Opera el `SchedulePlanner`, ejecuta el optimizador, asigna salas/bloques y monitorea cobertura desde el `CoordinatorDashboard`. Tiene permisos CRUD sobre cursos, grupos, matrículas, programas y salones. | `CoordinatorDashboard`, `OptimizerOnboardingGuide`, `SchedulePlanner`. |
+| **Docente** | Consulta sus cursos, horarios y métricas de carga; puede revisar estudiantes inscritos y registrar información académica según los endpoints habilitados (asistencia, calificaciones). | `TeacherDashboard`, vista de horario personal. |
+| **Estudiante** | Accede a su horario consolidado, seguimiento de créditos y mensajes clave del coordinador. | `StudentDashboard`, `StudentScheduleDashboard`. |
 
 ## Requisitos previos
 - Docker 24+ y Docker Compose v2 (para la opción containerizada).
@@ -103,6 +114,8 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
 - `POST /auth/token`: login y obtención de JWT.
 - `POST /auth/signup`: creación de usuarios (rol configurable).
 - `POST /auth/change-password`: permite que el usuario autenticado actualice su contraseña cuando `must_change_password` es `true`.
+- `GET/PATCH /users/me`: devuelve y actualiza perfil (nombre completo, rol, bandera de cambio de contraseña) del usuario autenticado.
+- `PUT /users/me/avatar`: guarda o borra la imagen de perfil en formato data URL base64.
 - `GET/POST/PUT/DELETE /settings`: CRUD de ajustes institucionales (solo admins).
 - `GET /settings/public`: ajustes visibles para clientes.
 - `POST /schedule/optimize`: ejecuta el optimizador greedy/OR-Tools y retorna propuesta.
@@ -114,7 +127,9 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
 - Componentes principales:
   - `GlobalScheduleOptimizer`: vista previa de propuestas con botón **Aplicar**.
   - `ApplicationSettings`: formulario agrupado por categorías con consumo de `/settings`.
-  - Dashboards por rol (`AdminDashboard`, `TeacherDashboard`, `StudentDashboard`) con barra lateral persistente (`DashboardLayout`).
+  - `OptimizerOnboardingGuide`: asistente visual que guía a coordinadores y nuevos usuarios por las capacidades del optimizador.
+  - Dashboards por rol (`AdminDashboard`, `CoordinatorDashboard`, `TeacherDashboard`, `StudentDashboard`) con barra lateral persistente (`DashboardLayout`).
+  - `StudentScheduleDashboard`: agenda estudiantil consolidada con filtros por programa y widgets de progreso.
 - Scripts disponibles (`frontend/package.json`):
   - `npm run dev`: servidor de desarrollo.
   - `npm run build`: build de producción + `tsc`.
@@ -180,8 +195,10 @@ frontend/
 ```
 
 ## Usuarios demo
-- Admin: `admin@academiapro.dev` / `admin123`
-- Coordinador académico: `coordinador@academiapro.dev` / `coordinador123`
+- Admin: `admin@academiapro.dev` / `admin123` (se solicita cambio inicial cuando `APP_ENV=prod`).
+- Coordinador académico: `coordinador@academiapro.dev` / `coordinador123`.
+- Docente: `docente1@academiapro.dev` / `teacher123` (asignado a Matemáticas, visible en `TeacherDashboard`).
+- Estudiante: `estudiante1@academiapro.dev` / `student123` (Ingeniería en Sistemas, tiene inscripciones activas para probar el portal estudiantil).
 
 Con estos credenciales puedes experimentar con el panel administrativo, modificar ajustes de marca y generar propuestas de horarios desde la vista del optimizador.
 
