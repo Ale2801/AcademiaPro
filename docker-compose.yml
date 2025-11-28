@@ -19,5 +19,11 @@ services:
       - "8000:8000"
     depends_on:
       - db
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
 volumes:
   db_data:

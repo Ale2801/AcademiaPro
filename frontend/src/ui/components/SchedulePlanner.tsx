@@ -266,6 +266,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
   const [dialogErrorSeverity, setDialogErrorSeverity] = useState<'warning' | 'error'>('warning')
   const [dialogManualAdjust, setDialogManualAdjust] = useState(false)
 
+  const canRunOptimizer = useMemo(
+    () => Boolean(selectedSemester && !loading && courses.length > 0 && rooms.length > 0 && timeslots.length > 0),
+    [selectedSemester, loading, courses.length, rooms.length, timeslots.length],
+  )
+
   const theme = useMantineTheme()
   const { colorScheme } = useMantineColorScheme()
 
@@ -1073,6 +1078,10 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       setError('Selecciona un programa y semestre antes de optimizar')
       return
     }
+    if (loading || courses.length === 0 || rooms.length === 0 || timeslots.length === 0) {
+      setError('Espera a que termine la carga del semestre antes de optimizar')
+      return
+    }
     setOptimizerLoading(true)
     setError(null)
     setSuccess(null)
@@ -1171,7 +1180,7 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     } finally {
       setOptimizerLoading(false)
     }
-  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxDailyHours, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
+  }, [selectedSemester, courses, rooms, timeslots, loading, buildTimeslotBlocks, maxDailyHours, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
 
   const handleApplyOptimized = useCallback(async () => {
     if (optimizerAssignments.length === 0) return
@@ -1801,7 +1810,12 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
           />
 
           <Group gap="sm">
-            <Button leftSection={<IconRun size={18} />} loading={optimizerLoading} onClick={() => runOptimizer()}>
+            <Button
+              leftSection={<IconRun size={18} />}
+              loading={optimizerLoading}
+              disabled={!canRunOptimizer}
+              onClick={() => runOptimizer()}
+            >
               Ejecutar optimizador
             </Button>
             {optimizerAssignments.length > 0 && (
