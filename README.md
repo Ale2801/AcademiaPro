@@ -53,7 +53,7 @@ docker compose up --build
 
 - API disponible en `http://localhost:8000`
 - Documentación interactiva en `http://localhost:8000/docs`
-- Frontend servido por Nginx dentro de Docker en `http://localhost:8080` (el proxy `/api` ya apunta al contenedor FastAPI)
+- Frontend en `http://localhost:5173` (cuando se ejecute `npm run dev` en otra terminal)
 
 En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario admin `admin@academiapro.dev` / `admin123`, coordinador y catálogos demo). Si estableces `APP_ENV=prod` en un archivo `.env` en la raíz del repositorio, el arranque omite los datos demo y solo crea el administrador por defecto con una contraseña temporal que debe ser cambiada tras el primer inicio de sesión.
 
@@ -69,13 +69,11 @@ En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario 
    ```
 
 2. **Frontend**
-  - Con Docker (recomendado para demostraciones): ya queda expuesto en `http://localhost:8080` al ejecutar `docker compose up`.
-  - Desarrollo local con Vite (hot reload):
-    ```bash
-    cd frontend
-    npm install
-    npm run dev
-    ```
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
 3. **Base de datos**
    - Para SQLite (modo pruebas) no se requiere ningún paso adicional.
