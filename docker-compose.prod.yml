@@ -15,6 +15,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://app:app@db:5432/academiapro
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change}
       DEBUG: "false"
+      APP_ENV: ${APP_ENV:-prod}
     depends_on:
       - db
     ports:
