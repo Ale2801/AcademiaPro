@@ -72,3 +72,41 @@ def test_force_password_reset_flag_sets_on_admin_creation(client: TestClient):
         admin = session.exec(select(User).where(User.email == DEFAULT_ADMIN_EMAIL)).first()
         assert admin is not None
         assert admin.must_change_password is True
+
+
+def test_force_password_reset_allows_changing_without_current_secret(client: TestClient):
+    ensure_default_admin(force_password_reset=True)
+
+    login = client.post(
+        "/auth/token",
+        data={"username": DEFAULT_ADMIN_EMAIL, "password": "admin123"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert login.status_code == 200
+    assert login.json()["must_change_password"] is True
+
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    same_password = client.post(
+        "/auth/change-password",
+        json={"new_password": "admin123"},
+        headers=headers,
+    )
+    assert same_password.status_code == 400
+
+    ok = client.post(
+        "/auth/change-password",
+        json={"new_password": "Nuev4Secure!"},
+        headers=headers,
+    )
+    assert ok.status_code == 200
+    assert ok.json()["must_change_password"] is False
+
+    relog = client.post(
+        "/auth/token",
+        data={"username": DEFAULT_ADMIN_EMAIL, "password": "Nuev4Secure!"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert relog.status_code == 200
+    assert relog.json()["must_change_password"] is False

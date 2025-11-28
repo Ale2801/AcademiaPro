@@ -23,6 +23,7 @@ import GlobalScheduleOptimizer from './components/GlobalScheduleOptimizer'
 import SchedulePlanner from './components/SchedulePlanner'
 import CurriculumGraph from './components/CurriculumGraph'
 import OptimizerOnboardingGuide from './components/OptimizerOnboardingGuide'
+import UserProvisioner from './admin/UserProvisioner'
 
 export const crudSections: Section[] = [
   {
@@ -342,13 +343,21 @@ export const crudSections: Section[] = [
 const plannerTabKey = 'planner'
 const globalPlannerTabKey = 'global-planner'
 const curriculumGraphTabKey = 'curriculum-graph'
+const userProvisionerTabKey = 'user-provisioning'
 
 export function Admin() {
   const location = useLocation()
   const navigate = useNavigate()
   const defaultTab = crudSections[0]?.key ?? plannerTabKey
   const validTabs = useMemo(
-    () => new Set<string>([...crudSections.map((section) => section.key), plannerTabKey, globalPlannerTabKey, curriculumGraphTabKey]),
+    () =>
+      new Set<string>([
+        ...crudSections.map((section) => section.key),
+        plannerTabKey,
+        globalPlannerTabKey,
+        curriculumGraphTabKey,
+        userProvisionerTabKey,
+      ]),
     [],
   )
   const deriveTabFromSearch = useCallback((search: string) => {
@@ -364,6 +373,7 @@ export function Admin() {
   const isPlanner = active === plannerTabKey
   const isGlobalPlanner = active === globalPlannerTabKey
   const isCurriculumGraph = active === curriculumGraphTabKey
+  const isUserProvisioner = active === userProvisionerTabKey
   const [introOpen, setIntroOpen] = useState(false)
 
   useEffect(() => {
@@ -436,6 +446,9 @@ export function Admin() {
                 {section.title}
               </Tabs.Tab>
             ))}
+            <Tabs.Tab value={userProvisionerTabKey} leftSection={<IconUsersGroup size={16} />}>
+              Usuarios
+            </Tabs.Tab>
             <Tabs.Tab value={plannerTabKey} leftSection={<IconCalendarCog size={16} />}>
               Planificador por programa
             </Tabs.Tab>
@@ -455,6 +468,8 @@ export function Admin() {
         <GlobalScheduleOptimizer />
       ) : isCurriculumGraph ? (
         <CurriculumGraph />
+      ) : isUserProvisioner ? (
+        <UserProvisioner />
       ) : (
         current && <CrudSection section={current} />
       )}

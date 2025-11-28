@@ -45,3 +45,34 @@ def test_update_profile_image_validates_data_url(client: TestClient, admin_token
     cleared = client.put("/users/me/avatar", json={"image_data": None}, headers=_auth_headers(admin_token))
     assert cleared.status_code == 200
     assert cleared.json()["profile_image"] is None
+
+
+def test_admin_can_create_user_with_temporary_password(client: TestClient, admin_token: str):
+    payload = {
+        "email": "nuevo.profesor@academy.test",
+        "full_name": "Profesor Demo",
+        "role": "teacher",
+        "password": "TempPass123!",
+        "require_password_change": True,
+    }
+    res = client.post("/users/", json=payload, headers=_auth_headers(admin_token))
+    assert res.status_code == 201, res.text
+    data = res.json()
+    assert data["email"] == payload["email"].lower()
+    assert data["role"] == "teacher"
+    assert data["temporary_password"] == payload["password"]
+    assert data["must_change_password"] is True
+
+
+def test_coordinator_cannot_create_users(client: TestClient, coordinator_token: str):
+    res = client.post(
+        "/users/",
+        json={
+            "email": "blocked@test.com",
+            "full_name": "No Autorizado",
+            "role": "student",
+            "password": "Temporal123",
+        },
+        headers=_auth_headers(coordinator_token),
+    )
+    assert res.status_code == 403

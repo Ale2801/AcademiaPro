@@ -57,7 +57,7 @@ def signup(payload: SignupRequest, session=Depends(get_session)):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str = Field(min_length=6)
+    current_password: str | None = Field(default=None, min_length=6)
     new_password: str = Field(min_length=8)
 
 
@@ -67,9 +67,19 @@ def change_password(
     user: User = Depends(get_current_user),
     session=Depends(get_session),
 ):
-    if not verify_password(payload.current_password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
-    if payload.current_password == payload.new_password:
+    requires_current = not user.must_change_password
+
+    if requires_current:
+        if not payload.current_password:
+            raise HTTPException(status_code=400, detail="Debes proporcionar la contraseña actual")
+        if not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    elif payload.current_password:
+        # Si el usuario en fuerza de cambio eligió enviar la contraseña previa, aún la validamos.
+        if not verify_password(payload.current_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+
+    if verify_password(payload.new_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="La nueva contraseña debe ser diferente")
     user.hashed_password = get_password_hash(payload.new_password)
     user.must_change_password = False

@@ -2,9 +2,9 @@ services:
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: academiapro
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-academiapro}
     volumes:
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -12,7 +12,7 @@ services:
   api:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg2://app:app@db:5432/academiapro
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-academiapro}
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change}
       DEBUG: "false"
       APP_ENV: ${APP_ENV:-prod}

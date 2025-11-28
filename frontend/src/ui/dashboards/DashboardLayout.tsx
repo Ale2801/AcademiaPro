@@ -94,6 +94,7 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   }
   const isAuthenticated = Boolean(authToken || storedToken || tokenFromStorage)
   const enforcePasswordChange = Boolean(mustChangePassword && isAuthenticated)
+  const requiresCurrentPassword = !enforcePasswordChange
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false)
   const [profileData, setProfileData] = useState<UserProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
@@ -281,21 +282,23 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   const handleChangePassword = async () => {
     setChangeError(null)
     setChangeSuccess(null)
-    if (!currentPassword.trim()) {
+    const sanitizedCurrent = currentPassword.trim()
+    const sanitizedNew = newPassword.trim()
+    if (requiresCurrentPassword && !sanitizedCurrent) {
       setChangeError('Debes ingresar tu contraseña actual.')
       return
     }
-    if (newPassword.trim().length < 8) {
+    if (sanitizedNew.length < 8) {
       setChangeError('La nueva contraseña debe tener al menos 8 caracteres.')
       return
     }
-    if (newPassword !== confirmPassword) {
+    if (sanitizedNew !== confirmPassword) {
       setChangeError('La confirmación no coincide con la nueva contraseña.')
       return
     }
     setIsChangingPassword(true)
     try {
-      await changePassword(currentPassword, newPassword)
+      await changePassword(requiresCurrentPassword ? sanitizedCurrent : undefined, sanitizedNew)
       resetPasswordForm()
       setChangeSuccess('Tu contraseña se actualizó correctamente.')
     } catch (e: any) {
@@ -506,6 +509,11 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
             <Text size="sm" c="dimmed">
               Estás usando credenciales temporales. Por seguridad debes definir una contraseña nueva antes de continuar.
             </Text>
+            {!requiresCurrentPassword && (
+              <Text size="sm" c="dimmed">
+                Solo ingresa tu nueva contraseña y confírmala; no necesitas la contraseña temporal.
+              </Text>
+            )}
             {changeError && (
               <Alert color="red" icon={<IconAlertCircle size={16} />}>
                 {changeError}
@@ -516,13 +524,15 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
                 {changeSuccess}
               </Alert>
             )}
-            <PasswordInput
-              label="Contraseña actual"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.currentTarget.value)}
-              required
-              disabled={isChangingPassword}
-            />
+            {requiresCurrentPassword && (
+              <PasswordInput
+                label="Contraseña actual"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.currentTarget.value)}
+                required
+                disabled={isChangingPassword}
+              />
+            )}
             <PasswordInput
               label="Nueva contraseña"
               description="Debe tener al menos 8 caracteres"

@@ -6,7 +6,7 @@ type AuthState = {
   mustChangePassword: boolean
   login: (email: string, password: string) => Promise<void>
   signup: (email: string, full_name: string, password: string, role: string) => Promise<void>
-  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  changePassword: (currentPassword: string | undefined, newPassword: string) => Promise<void>
   logout: () => void
 }
 
@@ -94,12 +94,15 @@ export const useAuth = create<AuthState>((set, get) => ({
       throw new Error(detail)
     }
   },
-  async changePassword(currentPassword, newPassword) {
+  async changePassword(currentPassword: string | undefined, newPassword: string) {
     try {
-      const { data } = await api.post('/auth/change-password', {
-        current_password: currentPassword,
+      const payload: { new_password: string; current_password?: string } = {
         new_password: newPassword,
-      })
+      }
+      if (currentPassword) {
+        payload.current_password = currentPassword
+      }
+      const { data } = await api.post('/auth/change-password', payload)
       const mustChange = Boolean(data.must_change_password)
       setAuth(data.access_token)
       persistToken(data.access_token)
