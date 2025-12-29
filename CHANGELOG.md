@@ -2,11 +2,17 @@
 
 Registro completo de cada push aplicado sobre `main`. Cada entrada usa el formato estándar `AAAA-MM-DD – hash – mensaje` y resume en español los cambios más relevantes.
 
+## 2025-12-29 – cb50c77 – feat: learning & storage workflows
+- Crea los routers `/files`, `/course-materials` y `/assignments`, servicios de almacenamiento y utilidades de acceso junto a migraciones, seeds, scripts y reportes para soportar subida/descarga segura de materiales.
+- Incorpora módulos de aprendizaje (learning pages, rutas y librerías en frontend) con pruebas nuevas para docentes, estudiantes y flujo de landing, además de ajustes en `App`, dashboards y barra de navegación.
+- Refuerza el optimizador global: nuevos heurísticos en `optimizer.py`, validaciones adicionales en `schedule.py` y métricas detalladas para comprender asignaciones y conflictos.
+- Amplía la configuración (requirements, config, security) y documentación (`README`, requerimientos) para reflejar los nuevos procesos operativos.
+
 ## 2025-12-29 – 2088172 – feat: enforce teacher conflicts in planner
 - El planner por programa envía `teacher_conflicts` derivados del horario global o del semestre activo para respetar choques docentes ya asignados.
 - `ScheduleTimeline` expone `teacher_id` en sus entradas para que otros componentes puedan reutilizar la metadata del docente.
 - Nuevas pruebas en `SchedulePlanner.test.tsx` cubren tanto la detección de conflictos globales como locales antes de llamar al optimizador.
-- Se agrega una prueba de backend que verifica que `/schedule/optimize` honre explícitamente los `teacher_conflicts` recibidos.
+- Se agrega una prueba de backend que verifica que `/schedule/optimize` honra explícitamente los `teacher_conflicts` recibidos.
 
 ## 2025-11-25 – 625d1a7 – chore: sync latest updates
 - Agrega migraciones para `must_change_password` y `profile_image`, más endpoints `/users/me` y `/users/me/avatar` con pruebas de backend.
