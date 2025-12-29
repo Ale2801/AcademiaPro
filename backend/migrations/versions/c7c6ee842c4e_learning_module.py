@@ -25,10 +25,6 @@ submission_status_enum = sa.Enum("draft", "submitted", "graded", "returned", nam
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    material_type_enum.create(bind, checkfirst=True)
-    assignment_type_enum.create(bind, checkfirst=True)
-    submission_status_enum.create(bind, checkfirst=True)
 
     op.create_table(
         "coursematerial",
