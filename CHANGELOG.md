@@ -2,6 +2,12 @@
 
 Registro completo de cada push aplicado sobre `main`. Cada entrada usa el formato estándar `AAAA-MM-DD – hash – mensaje` y resume en español los cambios más relevantes.
 
+## 2025-12-29 – 2088172 – feat: enforce teacher conflicts in planner
+- El planner por programa envía `teacher_conflicts` derivados del horario global o del semestre activo para respetar choques docentes ya asignados.
+- `ScheduleTimeline` expone `teacher_id` en sus entradas para que otros componentes puedan reutilizar la metadata del docente.
+- Nuevas pruebas en `SchedulePlanner.test.tsx` cubren tanto la detección de conflictos globales como locales antes de llamar al optimizador.
+- Se agrega una prueba de backend que verifica que `/schedule/optimize` honre explícitamente los `teacher_conflicts` recibidos.
+
 ## 2025-11-25 – 625d1a7 – chore: sync latest updates
 - Agrega migraciones para `must_change_password` y `profile_image`, más endpoints `/users/me` y `/users/me/avatar` con pruebas de backend.
 - Refuerza `DashboardLayout`, `CoordinatorDashboard` y `StudentScheduleDashboard`, añade `OptimizerOnboardingGuide` y mejora la experiencia del optimizador en frontend.
