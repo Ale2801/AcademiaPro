@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column("content_type", sa.String(length=255), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("owner_user_id", sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(["owner_user_id"], ["user.id"], ),
+        sa.ForeignKeyConstraint(["owner_user_id"], ["user.id"],),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_storedfile_driver"), "storedfile", ["driver"], unique=False)
