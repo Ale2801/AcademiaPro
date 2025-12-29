@@ -13,7 +13,6 @@ Sistema académico completo para gestionar catálogos, cursos y horarios con un 
 - [Frontend](#frontend)
 - [Optimizador de horarios](#optimizador-de-horarios)
 - [Pruebas automatizadas](#pruebas-automatizadas)
-- [Pruebas de carga](#pruebas-de-carga)
 - [Estructura del repositorio](#estructura-del-repositorio)
 
 ## Arquitectura general
@@ -177,51 +176,6 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
   ```
 
 La suite de pruebas backend usa SQLite en memoria (`DATABASE_URL=sqlite:///test.db`) y re-sembra los catálogos necesarios antes de cada caso.
-
-## Pruebas de carga
-- Los scripts viven en `backend/scripts/load_tests/` y usan `httpx`, ya incluido en `backend/requirements.txt`.
-- Soportan variables de entorno `API_BASE_URL` y `API_BEARER_TOKEN` para evitar repetir parámetros en la CLI.
-- Requieren un JWT con permisos de coordinador o admin cuando consultan recursos protegidos.
-
-### Stress específico del optimizador
-Ejecuta solicitudes concurrentes a `POST /schedule/optimize`, reutilizando cursos, salas y bloques reales de la base:
-
-```bash
-cd backend
-python scripts/load_tests/stress_optimizer.py \
-  --token "<JWT_ADMIN>" \
-  --base-url http://localhost:8000 \
-  --requests 80 \
-  --concurrency 8 \
-  --courses-per-request 6
-```
-
-Parámetros útiles:
-- `--program-semester-id` restringe los cursos obtenidos para el payload.
-- `--rooms-per-request`, `--timeslots-per-request` y `--timeout` permiten ajustar la presión.
-
-### Stress genérico de la API
-Golpea cualquier endpoint (GET/POST/PUT/PATCH/DELETE) con cuerpo opcional:
-
-```bash
-cd backend
-python scripts/load_tests/stress_api.py \
-  --endpoint / \
-  --requests 400 \
-  --concurrency 40 \
-  --method GET
-
-# Ejemplo POST autenticado
-python scripts/load_tests/stress_api.py \
-  --endpoint /schedule/optimize \
-  --method POST \
-  --token "<JWT_ADMIN>" \
-  --body-file payload.json \
-  --requests 50 \
-  --concurrency 5
-```
-
-Agrega parámetros de query con `--param clave=valor` y encabezados personalizados con `--header X-Trace=stress`. Usa `--print-errors` para mostrar hasta 5 respuestas fallidas.
 
 ## Estructura del repositorio
 ```text
