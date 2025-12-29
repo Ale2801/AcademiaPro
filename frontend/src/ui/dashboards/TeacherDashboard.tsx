@@ -53,8 +53,8 @@ export default function TeacherDashboard() {
       }
     >
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-        <Widget title="Mis cursos" description="Lista y administra secciones a tu cargo"
-          action={<Button variant="filled" color="dark">Ver cursos</Button>} />
+        <Widget title="Materiales y evaluaciones" description="Publica recursos y revisa entregas"
+          action={<Button variant="filled" color="dark" onClick={() => navigate('/dashboard/teacher/learning')}>Abrir módulo</Button>} />
         <Widget title="Evaluaciones" description="Crea y califica evaluaciones"
           action={<Button variant="filled" color="dark">Gestionar</Button>} />
         <Widget title="Asistencia" description="Marca asistencia por clase"

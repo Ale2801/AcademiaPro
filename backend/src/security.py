@@ -13,6 +13,7 @@ from .models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+oauth2_optional_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -34,7 +35,7 @@ def create_access_token(subject: str, expires_minutes: Optional[int] = None, ext
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), session=Depends(get_session)) -> User:
+def authenticate_token(token: str, session) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado", headers={"WWW-Authenticate": "Bearer"}
     )
@@ -49,6 +50,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), session=Depends(get_se
     if not user or not user.is_active:
         raise credentials_exception
     return user
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), session=Depends(get_session)) -> User:
+    return authenticate_token(token, session)
+
+
+def get_current_user_optional(
+    token: Optional[str] = Depends(oauth2_optional_scheme), session=Depends(get_session)
+) -> Optional[User]:
+    if not token:
+        return None
+    return authenticate_token(token, session)
 
 
 def require_roles(*roles: str):

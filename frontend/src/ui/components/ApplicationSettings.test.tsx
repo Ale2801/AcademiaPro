@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core'
 import { vi } from 'vitest'
 
 import ApplicationSettings from './ApplicationSettings'
+import { useAppSettingsStore } from '../../lib/settings'
 
 type MockSetting = {
   key: string
@@ -33,6 +34,14 @@ const defaultSettings: MockSetting[] = [
   { key: 'branding.tagline', value: 'Innovación y talento', description: null, is_public: true },
   { key: 'branding.logo_url', value: 'https://cdn.example.com/logo.png', description: 'Logo principal', is_public: true },
   { key: 'branding.primary_color', value: '#004488', description: 'Color corporativo', is_public: true },
+  { key: 'branding.enable_landing', value: 'true', description: 'Muestra la landing interna', is_public: true },
+  { key: 'branding.portal_url', value: 'https://portal.academia.edu', description: 'Portal personalizado', is_public: true },
+  { key: 'theme.light_primary', value: '#4338ca', category: 'theme', is_public: true },
+  { key: 'theme.light_surface', value: '#f8fafc', category: 'theme', is_public: true },
+  { key: 'theme.light_accent', value: '#0ea5e9', category: 'theme', is_public: true },
+  { key: 'theme.dark_primary', value: '#a5b4fc', category: 'theme', is_public: true },
+  { key: 'theme.dark_surface', value: '#0f172a', category: 'theme', is_public: true },
+  { key: 'theme.dark_accent', value: '#34d399', category: 'theme', is_public: true },
   { key: 'platform.default_language', value: 'es', description: 'Idioma por defecto', is_public: true },
   { key: 'platform.timezone', value: 'America/Bogota', description: 'Zona horaria oficial', is_public: true },
   { key: 'contact.support_email', value: 'soporte@academia.edu', description: 'Email de soporte', is_public: true },
@@ -53,6 +62,13 @@ describe('ApplicationSettings', () => {
     putMock.mockReset()
     getMock.mockResolvedValue({ data: defaultSettings })
     putMock.mockResolvedValue({ data: {} })
+    useAppSettingsStore.setState((state) => ({
+      ...state,
+      values: {},
+      loadingCategories: {},
+      loadedCategories: {},
+      error: undefined,
+    }))
   })
 
   it('muestra ajustes cargados y la previsualización de branding', async () => {

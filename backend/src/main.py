@@ -19,6 +19,7 @@ from .routers import (
     settings as settings_router,
 )
 from .routers import student_schedule
+from .routers import course_materials, assignments, files
 
 
 @asynccontextmanager
@@ -55,6 +56,9 @@ app.include_router(subjects.router)
 app.include_router(rooms.router)
 app.include_router(courses.router)
 app.include_router(users.router)
+app.include_router(course_materials.router)
+app.include_router(assignments.router)
+app.include_router(files.router)
 app.include_router(enrollments.router)
 app.include_router(evaluations.router)
 app.include_router(grades.router)

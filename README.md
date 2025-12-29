@@ -90,9 +90,21 @@ En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario 
   APP_ENV=prod
   SECRET_KEY=tu-clave-segura
   DATABASE_URL=postgresql://user:pass@db:5432/academiapro
+  FILE_STORAGE_DRIVER=local
+  FILE_STORAGE_LOCAL_PATH=./uploads
   ```
   En este modo se creará únicamente el administrador demo y se le solicitará forzar el cambio de contraseña al autenticarse.
+- **Asistente interactivo**: si prefieres no editar el `.env` a mano, ejecuta el script CLI y sigue las indicaciones (valida la conexión a la base y crea la carpeta de almacenamiento local si no existe):
+  ```bash
+  cd backend
+  python scripts/configure_env.py
+  ```
+  El asistente conserva variables no gestionadas, permite saltar la validación cuando la base aún no está levantada (p. ej. antes de `docker compose up`) y ofrece reintentos cuando sí deseas comprobar la conexión.
 - Frontend: `VITE_API_BASE` para apuntar a una URL distinta de `/api`.
+- `FILE_STORAGE_DRIVER`: fija el backend para subir archivos (`local`, `docker_volume` o `s3`). Por defecto es `local` y los adjuntos se guardan en `./uploads`.
+- `FILE_STORAGE_LOCAL_PATH`: ruta absoluta o relativa que se usará cuando el driver sea `local` (default `./uploads`).
+- `FILE_STORAGE_DOCKER_PATH`: ruta dentro del contenedor cuando se monte un volumen (default `/data/uploads`).
+- `FILE_STORAGE_S3_BUCKET`, `FILE_STORAGE_S3_REGION`, `FILE_STORAGE_S3_ENDPOINT`, `FILE_STORAGE_S3_ACCESS_KEY_ID`, `FILE_STORAGE_S3_SECRET_ACCESS_KEY`, `FILE_STORAGE_S3_USE_SSL`: datos necesarios para apuntar a un bucket S3 (o compatible) cuando `FILE_STORAGE_DRIVER=s3`.
 
 El backend expone un endpoint `/settings/public` para ajustes visibles en el frontend (branding, idioma, zona horaria, etc.). Los valores iniciales se controlan mediante `src/seed.py`.
 

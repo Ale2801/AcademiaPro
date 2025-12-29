@@ -83,8 +83,10 @@ export default function StudentDashboard() {
     >
       <Stack gap="xl">
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+          <Widget title="Materiales y tareas" description="Descarga recursos y entrega evaluaciones"
+            action={<Button variant="filled" color="dark" onClick={() => navigate('/dashboard/student/learning')}>Abrir módulo</Button>} />
           <Widget title="Mis cursos" description="Consulta contenidos y calificaciones"
-            action={<Button variant="filled" color="dark">Ver cursos</Button>} />
+            action={<Button variant="light" color="dark">Ver cursos</Button>} />
           <Widget title="Calificaciones" description="Resumen de notas por evaluación"
             action={<Button variant="filled" color="dark">Revisar</Button>} />
           <Widget title="Planificador" description="Ajusta tu carga académica"

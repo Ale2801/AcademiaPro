@@ -1,5 +1,6 @@
 import os
 import importlib
+import shutil
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,9 +11,16 @@ def client():
     test_db_path = os.path.abspath("test.db")
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
     os.environ["APP_ENV"] = "dev"
+    upload_dir = os.path.abspath("test_uploads")
+    os.environ["FILE_STORAGE_DRIVER"] = "local"
+    os.environ["FILE_STORAGE_LOCAL_PATH"] = upload_dir
 
     try:
         os.remove(test_db_path)
+    except FileNotFoundError:
+        pass
+    try:
+        shutil.rmtree(upload_dir)
     except FileNotFoundError:
         pass
 
@@ -65,6 +73,10 @@ def client():
     client = TestClient(main.app)
     yield client
     client.close()
+    try:
+        shutil.rmtree(upload_dir)
+    except FileNotFoundError:
+        pass
 
 
 @pytest.fixture()

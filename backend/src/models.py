@@ -1,6 +1,7 @@
 from datetime import datetime, date, time
 from typing import Optional
 from enum import Enum
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Relationship
 
 
@@ -40,6 +41,29 @@ class ModalityEnum(str, Enum):
     in_person = "in_person"
     online = "online"
     hybrid = "hybrid"
+
+
+class MaterialTypeEnum(str, Enum):
+    document = "document"
+    link = "link"
+    video = "video"
+    resource = "resource"
+    other = "other"
+
+
+class AssignmentTypeEnum(str, Enum):
+    homework = "homework"
+    project = "project"
+    quiz = "quiz"
+    exam = "exam"
+    other = "other"
+
+
+class SubmissionStatusEnum(str, Enum):
+    draft = "draft"
+    submitted = "submitted"
+    graded = "graded"
+    returned = "returned"
 
 
 class EnrollmentStatusEnum(str, Enum):
@@ -286,6 +310,85 @@ class Grade(SQLModel, table=True):
     score: float
     graded_at: Optional[datetime] = None
     feedback: Optional[str] = None
+
+
+class CourseMaterial(Timestamped, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    course_id: int = Field(foreign_key="course.id", index=True)
+    teacher_id: Optional[int] = Field(
+        default=None,
+        foreign_key="teacher.id",
+        index=True,
+        sa_column_kwargs={"nullable": True},
+    )
+    created_by_user_id: Optional[int] = Field(
+        default=None,
+        foreign_key="user.id",
+        sa_column_kwargs={"nullable": True},
+    )
+    title: str
+    description: Optional[str] = None
+    material_type: MaterialTypeEnum = Field(default=MaterialTypeEnum.document)
+    file_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    external_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    display_order: Optional[int] = Field(default=None, sa_column_kwargs={"nullable": True})
+    is_published: bool = Field(default=True)
+    published_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+
+
+class Assignment(Timestamped, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    course_id: int = Field(foreign_key="course.id", index=True)
+    teacher_id: Optional[int] = Field(
+        default=None,
+        foreign_key="teacher.id",
+        index=True,
+        sa_column_kwargs={"nullable": True},
+    )
+    title: str
+    instructions: Optional[str] = None
+    assignment_type: AssignmentTypeEnum = Field(default=AssignmentTypeEnum.homework)
+    available_from: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+    due_date: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+    allow_late: bool = Field(default=False)
+    max_score: float = Field(default=100)
+    resource_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    attachment_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    attachment_name: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    is_published: bool = Field(default=True)
+    published_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+
+
+class AssignmentSubmission(Timestamped, table=True):
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "enrollment_id", name="uq_assignment_submission"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    assignment_id: int = Field(foreign_key="assignment.id", index=True)
+    enrollment_id: int = Field(foreign_key="enrollment.id", index=True)
+    student_id: int = Field(foreign_key="student.id", index=True)
+    status: SubmissionStatusEnum = Field(default=SubmissionStatusEnum.submitted)
+    submitted_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+    text_response: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    file_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    external_url: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+    is_late: bool = Field(default=False)
+    grade_score: Optional[float] = Field(default=None, sa_column_kwargs={"nullable": True})
+    graded_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"nullable": True})
+    graded_by: Optional[int] = Field(default=None, foreign_key="teacher.id", sa_column_kwargs={"nullable": True})
+    feedback: Optional[str] = Field(default=None, sa_column_kwargs={"nullable": True})
+
+
+class StoredFile(Timestamped, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    original_name: str = Field(max_length=512)
+    scope: Optional[str] = Field(default=None, index=True, max_length=128, sa_column_kwargs={"nullable": True})
+    driver: str = Field(default="local", index=True, max_length=32)
+    storage_path: str = Field(index=True, description="Ruta lógica o key en el proveedor", max_length=1024)
+    content_type: Optional[str] = Field(default=None, max_length=255, sa_column_kwargs={"nullable": True})
+    size_bytes: int = Field(default=0)
+    owner_user_id: Optional[int] = Field(default=None, foreign_key="user.id", sa_column_kwargs={"nullable": True})
 
 
 class Attendance(SQLModel, table=True):

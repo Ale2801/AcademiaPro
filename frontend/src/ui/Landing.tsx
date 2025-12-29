@@ -3,6 +3,7 @@ import { Container, Title, Text, Button, Group, Stack, SimpleGrid, Paper, ThemeI
 import { IconCircleCheck } from '@tabler/icons-react'
 import { Navbar } from './components/Navbar'
 import { Link } from 'react-router-dom'
+import { useBrandingSettings } from '../lib/settings'
 
 function Hero() {
   return (
@@ -84,11 +85,12 @@ function Pricing() {
 }
 
 function Footer() {
+  const { appName } = useBrandingSettings()
   return (
   <footer id="contact" className="lp-footer" style={{ padding: '2rem 0', borderTop: '1px solid #e2e8f0' }}>
       <Container size="lg">
         <Group justify="space-between" align="center">
-          <Text>© {new Date().getFullYear()} AcademiaPro</Text>
+          <Text>© {new Date().getFullYear()} {appName}</Text>
           <Group gap="lg">
             <Anchor component={Link} to="/app">Entrar</Anchor>
             <Anchor component={Link} to="#features">Características</Anchor>

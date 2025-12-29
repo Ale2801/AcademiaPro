@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { useAuth } from '../lib/auth'
+import { useBrandingSettings } from '../lib/settings'
 import { Admin } from './Admin'
 import { api } from '../lib/api'
 import {
@@ -66,6 +67,7 @@ type Student = {
 
 export function App() {
   const { token, login, signup, logout } = useAuth()
+  const { appName, enableLanding, portalUrl } = useBrandingSettings()
   const navigate = useNavigate()
   const [navbarOpened, { toggle: toggleNavbar, close: closeNavbar }] = useDisclosure(false)
   const [email, setEmail] = useState('admin@academiapro.dev')
@@ -116,6 +118,20 @@ export function App() {
     },
     [handleLogin]
   )
+
+  const handleNavigateHome = useCallback(() => {
+    if (enableLanding || !portalUrl) {
+      navigate('/')
+      return
+    }
+    if (portalUrl.startsWith('/')) {
+      navigate(portalUrl)
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.href = portalUrl
+    }
+  }, [enableLanding, navigate, portalUrl])
 
   useEffect(() => {
     if (!token) {
@@ -217,7 +233,7 @@ export function App() {
       <div className="lp-hero" style={{ minHeight: '100svh', width: '100%', display: 'flex', alignItems: 'center' }}>
         <div style={{ position: 'fixed', top: 16, left: 16, zIndex: 20 }}>
           <Tooltip label="Volver a la landing" withArrow>
-            <ActionIcon size="lg" variant="filled" color="dark" aria-label="Volver a la landing" onClick={() => navigate('/') }>
+            <ActionIcon size="lg" variant="filled" color="dark" aria-label="Volver a la landing" onClick={handleNavigateHome}>
               <IconHome size={18} />
             </ActionIcon>
           </Tooltip>
@@ -301,7 +317,7 @@ export function App() {
         navbar={{ width: 296, breakpoint: 'lg', collapsed: { mobile: !navbarOpened } }}
         styles={{
           main: {
-            background: 'linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(241,245,249,1) 35%, rgba(226,232,240,1) 100%)',
+            backgroundColor: 'var(--app-surface-color)',
           },
         }}
       >
@@ -311,7 +327,7 @@ export function App() {
               <Burger opened={navbarOpened} onClick={toggleNavbar} hiddenFrom="lg" size="sm" aria-label="Abrir menú" />
               <div>
                 <Text size="xs" c="dimmed">Bienvenido a</Text>
-                <Title order={4}>AcademiaPro Intranet</Title>
+                <Title order={4}>{appName} Intranet</Title>
               </div>
             </Group>
             <Group gap="md">

@@ -4,6 +4,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { IconMoon, IconSun } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { useMantineColorScheme } from '@mantine/core'
+import { useBrandingSettings } from '../../lib/settings'
 
 const NavLink = ({ to, children }: { to: string; children: React.ReactNode }) => (
   <Anchor component={Link} to={to} fz="sm">
@@ -14,6 +15,7 @@ const NavLink = ({ to, children }: { to: string; children: React.ReactNode }) =>
 export function Navbar() {
   const [opened, { toggle, close }] = useDisclosure(false)
   const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const { appName } = useBrandingSettings()
   const bg = colorScheme === 'dark' ? 'rgba(2,6,23,0.65)' : 'rgba(255,255,255,0.7)'
   const border = colorScheme === 'dark' ? '1px solid rgba(51,65,85,.6)' : '1px solid rgba(226,232,240,.5)'
 
@@ -21,7 +23,7 @@ export function Navbar() {
     <header style={{ position: 'sticky', top: 0, zIndex: 10, backdropFilter: 'saturate(180%) blur(6px)', background: bg, borderBottom: border }}>
       <Container size="lg" py="sm">
         <Group justify="space-between" align="center">
-          <Title order={4} style={{ margin: 0 }}>AcademiaPro</Title>
+          <Title order={4} style={{ margin: 0 }}>{appName}</Title>
           <Group gap="md" visibleFrom="md" component="nav">
             <NavLink to="/">Inicio</NavLink>
             <NavLink to="#features">Características</NavLink>

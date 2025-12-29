@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from math import ceil
 from typing import Dict, List, Optional, Set, Tuple
+import time
 
 
 GRANULARITY_MINUTES = 15
@@ -59,6 +60,22 @@ class ScheduleQualityMetrics:
 
 
 @dataclass
+class PerformanceMetrics:
+    runtime_seconds: float = 0.0
+    requested_courses: int = 0
+    assigned_courses: int = 0
+    requested_minutes: int = 0
+    assigned_minutes: int = 0
+    fill_rate: float = 0.0  # porcentaje de minutos asignados vs requeridos
+
+
+@dataclass
+class OptimizationDiagnostics:
+    messages: List[str] = field(default_factory=list)
+    unassigned_causes: Dict[int, str] = field(default_factory=dict)
+
+
+@dataclass
 class Constraints:
     teacher_availability: Dict[int, List[int]]  # docente_id -> ids de timeslot permitidos
     room_allowed: Optional[Dict[int, List[int]]] = None  # sala_id -> ids de timeslot permitidos
@@ -87,6 +104,8 @@ class SolveResult:
     assignments: List[AssignmentResult]
     unassigned: Dict[int, int]  # course_id -> minutos pendientes por asignar
     quality_metrics: ScheduleQualityMetrics = field(default_factory=ScheduleQualityMetrics)
+    performance_metrics: PerformanceMetrics = field(default_factory=PerformanceMetrics)
+    diagnostics: OptimizationDiagnostics = field(default_factory=OptimizationDiagnostics)
 
 
 def solve_schedule(
@@ -95,7 +114,82 @@ def solve_schedule(
     timeslots: List[TimeslotInput],
     cons: Constraints,
 ) -> SolveResult:
-    return _solve_partial_greedy(courses, rooms, timeslots, cons)
+    attempts: List[SolveResult] = []
+
+    base_result = _solve_partial_greedy(courses, rooms, timeslots, cons)
+    attempts.append(base_result)
+
+    # Estrategia: si quedaron cursos pendientes, reordenar los cursos para priorizar
+    # a los docentes que acumularon mayor déficit de minutos.
+    if base_result.unassigned:
+        prioritized_courses = _prioritize_courses_by_teacher_load(courses, base_result)
+        if prioritized_courses is not None:
+            teacher_rebalanced = _solve_partial_greedy(prioritized_courses, rooms, timeslots, cons)
+            attempts.append(teacher_rebalanced)
+
+    # Último intento determinista: invertir el orden de los bloques para alterar la distribución
+    # temporal cuando el recorrido cronológico genera cuellos de botella.
+    if base_result.unassigned:
+        reversed_timeslots = list(reversed(timeslots))
+        if reversed_timeslots != timeslots:
+            reversed_result = _solve_partial_greedy(courses, rooms, reversed_timeslots, cons)
+            attempts.append(reversed_result)
+
+    def _score(result: SolveResult) -> Tuple[int, int, float]:
+        return (
+            result.performance_metrics.assigned_courses,
+            -len(result.unassigned),
+            result.performance_metrics.fill_rate,
+        )
+
+    best = max(attempts, key=_score)
+    if best is not base_result and best.performance_metrics.assigned_courses > base_result.performance_metrics.assigned_courses:
+        best.diagnostics.messages.append(
+            "Se aplicaron intentos adicionales (priorización docente/orden alterno) para maximizar la cobertura."
+        )
+    return best
+
+
+def _prioritize_courses_by_teacher_load(
+    courses: List[CourseInput],
+    result: SolveResult,
+) -> Optional[List[CourseInput]]:
+    """Reordena cursos priorizando docentes con más minutos pendientes."""
+
+    if not result.unassigned:
+        return None
+
+    course_required: Dict[int, int] = {}
+    for course in courses:
+        course_required[course.course_id] = max(course.weekly_hours, 0) * 60
+
+    course_assigned: Dict[int, int] = defaultdict(int)
+    for assignment in result.assignments:
+        course_assigned[assignment.course_id] += assignment.duration_minutes
+
+    teacher_deficit: Dict[int, int] = defaultdict(int)
+    course_priority: Dict[int, Tuple[int, int]] = {}
+
+    for idx, course in enumerate(courses):
+        required = course_required.get(course.course_id, 0)
+        assigned = course_assigned.get(course.course_id, 0)
+        deficit = max(required - assigned, 0)
+        if course.teacher_id is not None:
+            teacher_deficit[course.teacher_id] += deficit
+        course_priority[course.course_id] = (deficit, idx)
+
+    if not any(value > 0 for value in teacher_deficit.values()):
+        return None
+
+    def sort_key(course: CourseInput) -> Tuple[int, int, int]:
+        teacher_score = teacher_deficit.get(course.teacher_id, 0)
+        course_deficit, original_idx = course_priority[course.course_id]
+        return (-teacher_score, -course_deficit, original_idx)
+
+    prioritized = sorted(courses, key=sort_key)
+    if prioritized == courses:
+        return None
+    return prioritized
 
 
 def _build_slot_units(slot: TimeslotInput, break_minutes: int) -> List[Tuple[int, bool]]:
@@ -124,8 +218,27 @@ def _solve_partial_greedy(
     timeslots: List[TimeslotInput],
     cons: Constraints,
 ) -> SolveResult:
-    if not courses or not rooms or not timeslots:
-        return SolveResult([], {})
+    solve_started = time.perf_counter()
+    course_count_with_hours = sum(1 for course in courses if course.weekly_hours > 0)
+
+    def _empty_result(message: str) -> SolveResult:
+        diagnostics = OptimizationDiagnostics(messages=[message])
+        performance = PerformanceMetrics(
+            runtime_seconds=time.perf_counter() - solve_started,
+            requested_courses=course_count_with_hours,
+            assigned_courses=0,
+            requested_minutes=0,
+            assigned_minutes=0,
+            fill_rate=0.0,
+        )
+        return SolveResult([], {}, performance_metrics=performance, diagnostics=diagnostics)
+
+    if not courses:
+        return _empty_result("No se proporcionaron cursos para optimizar.")
+    if not rooms:
+        return _empty_result("No hay salas registradas para calcular el horario.")
+    if not timeslots:
+        return _empty_result("No hay bloques horarios disponibles para optimizar.")
 
     # Inicializar métricas de calidad
     quality_metrics = ScheduleQualityMetrics()
@@ -145,7 +258,7 @@ def _solve_partial_greedy(
         valid_timeslots.append(slot)
     
     if not valid_timeslots:
-        return SolveResult([], {})
+        return _empty_result("Ningún bloque quedó disponible tras aplicar jornadas o bloques de almuerzo.")
 
     effective_break_minutes = max(cons.min_gap_minutes, cons.reserve_break_minutes)
 
@@ -155,7 +268,7 @@ def _solve_partial_greedy(
         if units:
             slot_unit_templates[slot.timeslot_id] = units
     if not slot_unit_templates:
-        return SolveResult([], {})
+        return _empty_result("Los bloques configurados no tienen duración suficiente luego de aplicar descansos.")
 
     required_units: Dict[int, int] = {}
     remaining_units: Dict[int, int] = {}
@@ -170,7 +283,7 @@ def _solve_partial_greedy(
         course_lookup[course.course_id] = course
 
     if not required_units:
-        return SolveResult([], {})
+        return _empty_result("Los cursos no requieren horas semanales (weekly_hours=0).")
 
     all_timeslot_ids: Set[int] = set(s.timeslot_id for s in valid_timeslots)
     allowed_slots_map: Dict[int, Set[int]] = {}
@@ -460,11 +573,124 @@ def _solve_partial_greedy(
         len(used_timeslot_ids) / total_available_slots if total_available_slots > 0 else 0.0
     )
 
-    return SolveResult(
-        assignments=assignments, 
-        unassigned=unassigned,
-        quality_metrics=quality_metrics
+    requested_course_count = len(required_units)
+    requested_minutes_total = sum(required_units.values()) * GRANULARITY_MINUTES
+    unassigned_minutes_total = sum(unassigned.values())
+    assigned_minutes_total = max(requested_minutes_total - unassigned_minutes_total, 0)
+    runtime_seconds = time.perf_counter() - solve_started
+    fill_rate = (
+        assigned_minutes_total / requested_minutes_total
+        if requested_minutes_total > 0
+        else 0.0
     )
+    performance_metrics = PerformanceMetrics(
+        runtime_seconds=runtime_seconds,
+        requested_courses=requested_course_count,
+        assigned_courses=quality_metrics.total_assigned,
+        requested_minutes=requested_minutes_total,
+        assigned_minutes=assigned_minutes_total,
+        fill_rate=fill_rate,
+    )
+
+    diagnostics_messages: List[str] = []
+    diagnostics_messages.append(
+        f"Ejecución completada en {runtime_seconds:.3f} s."
+    )
+    diagnostics_messages.append(
+        f"Se asignaron {quality_metrics.total_assigned} de {requested_course_count} cursos solicitados."
+    )
+    if requested_minutes_total > 0:
+        hours_assigned = assigned_minutes_total / 60.0
+        hours_requested = requested_minutes_total / 60.0
+        diagnostics_messages.append(
+            "Cobertura de carga: {:.1f} h de {:.1f} h ({:.1%}).".format(
+                hours_assigned,
+                hours_requested,
+                fill_rate,
+            )
+        )
+    if unassigned:
+        diagnostics_messages.append(
+            f"{len(unassigned)} cursos quedaron con horas pendientes."
+        )
+    else:
+        diagnostics_messages.append("Todos los cursos quedaron cubiertos.")
+
+    unassigned_causes: Dict[int, str] = {}
+    if unassigned:
+        for course_id in unassigned:
+            reason = _infer_unassigned_reason(
+                course_id,
+                allowed_slots_map,
+                course_lookup,
+                slot_lookup,
+                cons,
+                program_daily_minutes,
+                teacher_conflicts_map,
+            )
+            if reason:
+                unassigned_causes[course_id] = reason
+
+        cause_counts = Counter(unassigned_causes.values())
+        if cause_counts:
+            formatted = ", ".join(
+                f"{cause} ({count})"
+                for cause, count in cause_counts.most_common(3)
+            )
+            diagnostics_messages.append(
+                f"Causas principales de cursos pendientes: {formatted}."
+            )
+
+    diagnostics = OptimizationDiagnostics(
+        messages=diagnostics_messages,
+        unassigned_causes=unassigned_causes,
+    )
+
+    return SolveResult(
+        assignments=assignments,
+        unassigned=unassigned,
+        quality_metrics=quality_metrics,
+        performance_metrics=performance_metrics,
+        diagnostics=diagnostics,
+    )
+
+
+def _infer_unassigned_reason(
+    course_id: int,
+    allowed_slots_map: Dict[int, Set[int]],
+    course_lookup: Dict[int, CourseInput],
+    slot_lookup: Dict[int, TimeslotInput],
+    cons: Constraints,
+    program_daily_minutes: Dict[Tuple[Optional[int], int], int],
+    teacher_conflicts_map: Dict[int, Set[int]],
+) -> str:
+    allowed = allowed_slots_map.get(course_id, set())
+    course = course_lookup.get(course_id)
+
+    if not allowed:
+        return "Sin bloques compatibles tras aplicar disponibilidad docente y jornadas."
+
+    if course:
+        teacher_id = course.teacher_id
+        if teacher_id is not None:
+            conflicts = teacher_conflicts_map.get(teacher_id)
+            if conflicts and allowed.issubset(conflicts):
+                return "El docente ya tenía compromisos en todos sus bloques disponibles."
+
+        if course.program_semester_id is not None and cons.max_daily_hours_per_program > 0:
+            max_minutes = cons.max_daily_hours_per_program * 60
+            allowed_days = {
+                slot_lookup[slot_id].day
+                for slot_id in allowed
+                if slot_id in slot_lookup
+            }
+            if allowed_days and all(
+                program_daily_minutes.get((course.program_semester_id, day), 0) >= max_minutes
+                for day in allowed_days
+            ):
+                return "El programa alcanzó su límite diario de horas permitidas."
+
+    return "No quedaron suficientes bloques o salas compatibles para completar sus horas."
 
 
 def _teacher_can_take_slot(

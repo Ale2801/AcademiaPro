@@ -3,6 +3,7 @@ import { Title, Text, Group, Avatar, Badge, ActionIcon, Tooltip, Modal, Button, 
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { api } from '../../lib/api'
+import { useBrandingSettings } from '../../lib/settings'
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -20,6 +21,7 @@ import {
   IconAlertCircle,
   IconDatabase,
   IconCamera,
+  IconBook2,
 } from '@tabler/icons-react'
 
 type UserProfile = {
@@ -62,6 +64,7 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
   const [isDragging, setIsDragging] = useState(false)
   const navigate = useNavigate()
   const { token: authToken, mustChangePassword, changePassword, logout } = useAuth()
+  const { appName } = useBrandingSettings()
   const location = useLocation()
   const { colorScheme, setColorScheme } = useMantineColorScheme()
   const [currentPassword, setCurrentPassword] = useState('')
@@ -140,6 +143,12 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
         },
         { label: 'Cursos', to: '/dashboard/admin#cursos', icon: IconChalkboard },
         { label: 'Evaluaciones', to: '/dashboard/admin#evaluaciones', icon: IconNotebook },
+        {
+          label: 'Recursos',
+          to: '/dashboard/admin/learning',
+          icon: IconBook2,
+          matcher: (path: string) => path.startsWith('/dashboard/admin/learning'),
+        },
         { label: 'Horario', to: '/dashboard/admin#horario', icon: IconCalendarStats },
         { label: 'Asistencia', to: '/dashboard/admin#asistencia', icon: IconUserCheck },
         {
@@ -158,6 +167,12 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
         },
         { label: 'Cobertura', to: '/dashboard/coordinator#planeacion', icon: IconCalendarStats },
         { label: 'Tareas', to: '/dashboard/coordinator#tareas', icon: IconClipboardList },
+        {
+          label: 'Recursos',
+          to: '/dashboard/coordinator/learning',
+          icon: IconBook2,
+          matcher: (path: string) => path.startsWith('/dashboard/coordinator/learning'),
+        },
         { label: 'Programas', to: '/dashboard/coordinator?catalog=programs#catalogos', icon: IconChalkboard },
         { label: 'Docentes', to: '/dashboard/coordinator?catalog=teachers#catalogos', icon: IconUsersGroup },
         { label: 'Catálogos', to: '/dashboard/coordinator#catalogos', icon: IconDatabase },
@@ -169,6 +184,12 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
           icon: IconLayoutDashboard,
           matcher: (path: string) => path === '/dashboard/teacher',
         },
+        {
+          label: 'Materiales',
+          to: '/dashboard/teacher/learning',
+          icon: IconNotebook,
+          matcher: (path: string) => path.startsWith('/dashboard/teacher/learning'),
+        },
         { label: 'Mis cursos', to: '/dashboard/teacher#cursos', icon: IconChalkboard },
         { label: 'Mi horario', to: '/dashboard/teacher#horario', icon: IconCalendarStats },
       ],
@@ -178,6 +199,12 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
           to: '/dashboard/student',
           icon: IconLayoutDashboard,
           matcher: (path: string) => path === '/dashboard/student',
+        },
+        {
+          label: 'Materiales',
+          to: '/dashboard/student/learning',
+          icon: IconNotebook,
+          matcher: (path: string) => path.startsWith('/dashboard/student/learning'),
         },
         {
           label: 'Matrícula',
@@ -388,7 +415,7 @@ export default function DashboardLayout({ title, subtitle, actions, children }: 
                 transition: 'writing-mode 220ms ease, letter-spacing 220ms ease'
               }}
             >
-              AcademiaPro
+              {appName}
             </Title>
             <Tooltip label={collapsed ? 'Expandir menú' : 'Colapsar menú'} withinPortal position="right">
               <ActionIcon

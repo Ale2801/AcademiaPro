@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Optional, List
 
 from sqlmodel import Session, select
 
 from . import db
 from .models import (
+    Assignment,
+    AssignmentSubmission,
+    AssignmentTypeEnum,
     Attendance,
     AppSetting,
     Course,
@@ -21,6 +24,7 @@ from .models import (
     Student,
     StudentProgramEnrollment,
     StudentStatusEnum,
+    SubmissionStatusEnum,
     Subject,
     SubjectPrerequisite,
     Teacher,
@@ -160,6 +164,8 @@ def ensure_demo_data() -> None:
         enrollment_map = _ensure_enrollments(session, student_map, course_map)
         _ensure_student_program_enrollments(session, student_map, program_map, semester_map)
         evaluation_map = _ensure_evaluations(session, course_map)
+        assignment_map = _ensure_assignments(session, course_map)
+        _ensure_assignment_submissions(session, assignment_map, enrollment_map, student_map)
         _ensure_grades(session, enrollment_map, evaluation_map)
         _ensure_attendance(session, enrollment_map)
 
@@ -196,6 +202,70 @@ def _ensure_app_settings(session: Session) -> None:
             "label": "Color primario",
             "description": "Color de acento principal para componentes interactivos.",
             "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "branding.enable_landing",
+            "value": "true",
+            "label": "Mostrar landing predeterminada",
+            "description": "Activa la página de inicio incluida por defecto. Si la desactivas, los usuarios verán el portal institucional.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "branding.portal_url",
+            "value": "",
+            "label": "Portal público personalizado",
+            "description": "URL del sitio institucional que se mostrará cuando se desactive la landing.",
+            "category": "branding",
+            "is_public": True,
+        },
+        {
+            "key": "theme.light_primary",
+            "value": "#4338ca",
+            "label": "Primario (modo claro)",
+            "description": "Color principal usado cuando la interfaz está en modo claro.",
+            "category": "theme",
+            "is_public": True,
+        },
+        {
+            "key": "theme.light_surface",
+            "value": "#f8fafc",
+            "label": "Superficie (modo claro)",
+            "description": "Color de fondo/base en modo claro.",
+            "category": "theme",
+            "is_public": True,
+        },
+        {
+            "key": "theme.light_accent",
+            "value": "#0ea5e9",
+            "label": "Acento (modo claro)",
+            "description": "Color secundario para resaltados en modo claro.",
+            "category": "theme",
+            "is_public": True,
+        },
+        {
+            "key": "theme.dark_primary",
+            "value": "#a5b4fc",
+            "label": "Primario (modo oscuro)",
+            "description": "Color principal usado cuando la interfaz está en modo oscuro.",
+            "category": "theme",
+            "is_public": True,
+        },
+        {
+            "key": "theme.dark_surface",
+            "value": "#0f172a",
+            "label": "Superficie (modo oscuro)",
+            "description": "Color de fondo/base en modo oscuro.",
+            "category": "theme",
+            "is_public": True,
+        },
+        {
+            "key": "theme.dark_accent",
+            "value": "#34d399",
+            "label": "Acento (modo oscuro)",
+            "description": "Color secundario para resaltados en modo oscuro.",
+            "category": "theme",
             "is_public": True,
         },
         {
@@ -1630,13 +1700,22 @@ def _ensure_rooms(session: Session) -> Dict[str, Room]:
 
 
 def _ensure_timeslots(session: Session) -> Dict[str, Timeslot]:
-    start_hour = 8
-    end_hour = 22  # Último bloque finaliza a las 22:00
-    data = []
+    blocks_per_day = 8
+    block_duration = timedelta(hours=1)
+    gap_duration = timedelta(minutes=15)
+    first_block_start = datetime.combine(date.today(), time(8, 0))
+
+    daily_template: List[tuple[time, time]] = []
+    current_start = first_block_start
+    for _ in range(blocks_per_day):
+        start_dt = current_start
+        end_dt = start_dt + block_duration
+        daily_template.append((start_dt.time(), end_dt.time()))
+        current_start = end_dt + gap_duration
+
+    data: List[Dict[str, Any]] = []
     for day in range(5):  # Lunes (0) a viernes (4)
-        for hour in range(start_hour, end_hour):
-            start = time(hour, 0)
-            end = time(hour + 1, 0)
+        for start, end in daily_template:
             data.append({"day_of_week": day, "start_time": start, "end_time": end})
     mapping: Dict[str, Timeslot] = {}
     for item in data:
@@ -2040,19 +2119,19 @@ def _ensure_course_schedules(
 ) -> None:
     data = [
         {"course_key": "MAT101-2025-1-A", "room_code": "A-201", "timeslot_key": "0-08:00"},
-        {"course_key": "MAT101-2025-1-B", "room_code": "B-105", "timeslot_key": "0-10:00"},
-        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "1-14:00", "duration_minutes": 50, "start_offset_minutes": 5},
-        {"course_key": "PRO201-2025-1-B", "room_code": "LAB-IA", "timeslot_key": "3-10:00"},
-        {"course_key": "ADM120-2025-1-A", "room_code": "AUD-1", "timeslot_key": "2-11:00"},
+        {"course_key": "MAT101-2025-1-B", "room_code": "B-105", "timeslot_key": "0-10:30"},
+        {"course_key": "PRO201-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "1-14:15", "duration_minutes": 50, "start_offset_minutes": 5},
+        {"course_key": "PRO201-2025-1-B", "room_code": "LAB-IA", "timeslot_key": "3-10:30"},
+        {"course_key": "ADM120-2025-1-A", "room_code": "AUD-1", "timeslot_key": "2-11:45"},
         {"course_key": "ADM210-2025-1-A", "room_code": "C-301", "timeslot_key": "1-08:00"},
-        {"course_key": "ADM315-2025-1-A", "room_code": "C-301", "timeslot_key": "4-14:00"},
+        {"course_key": "ADM315-2025-1-A", "room_code": "C-301", "timeslot_key": "4-14:15"},
         {"course_key": "DS501-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "2-08:00", "duration_minutes": 55},
-        {"course_key": "DS510-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "1-11:00"},
-        {"course_key": "DS530-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "3-14:00"},
-        {"course_key": "BD301-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "2-15:00"},
-        {"course_key": "SIS320-2025-1-A", "room_code": "A-201", "timeslot_key": "4-09:00"},
-        {"course_key": "IND130-2025-1-A", "room_code": "B-105", "timeslot_key": "3-17:00"},
-        {"course_key": "IND240-2025-1-A", "room_code": "C-301", "timeslot_key": "1-19:00"},
+        {"course_key": "DS510-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "1-11:45"},
+        {"course_key": "DS530-2025-1-A", "room_code": "LAB-DATA", "timeslot_key": "3-14:15"},
+        {"course_key": "BD301-2025-1-A", "room_code": "LAB-IA", "timeslot_key": "2-15:30"},
+        {"course_key": "SIS320-2025-1-A", "room_code": "A-201", "timeslot_key": "4-09:15"},
+        {"course_key": "IND130-2025-1-A", "room_code": "B-105", "timeslot_key": "3-16:45"},
+        {"course_key": "IND240-2025-1-A", "room_code": "C-301", "timeslot_key": "1-16:45"},
     ]
 
     for item in data:
@@ -2399,6 +2478,271 @@ def _ensure_student_program_enrollments(
 
     session.commit()
 
+
+def _ensure_assignments(
+    session: Session,
+    course_map: Dict[str, Course],
+) -> Dict[str, Assignment]:
+    data = [
+        {
+            "course_key": "MAT101-2025-1-A",
+            "title": "Guía de límites",
+            "assignment_type": AssignmentTypeEnum.homework,
+            "instructions": "Resuelve los ejercicios asignados en la guía y adjunta el desarrollo detallado.",
+            "available_from": datetime(2025, 3, 1, 8, 0),
+            "due_date": datetime(2025, 3, 8, 23, 59),
+            "allow_late": False,
+            "max_score": 100,
+            "resource_url": "https://www.desmos.com/calculator",
+            "attachment_url": "https://files.academiapro.dev/demo/guia-limites.pdf",
+            "attachment_name": "guia-limites.pdf",
+        },
+        {
+            "course_key": "MAT101-2025-1-A",
+            "title": "Quiz de derivadas",
+            "assignment_type": AssignmentTypeEnum.quiz,
+            "instructions": "Completa el quiz en la plataforma virtual y adjunta el comprobante del intento.",
+            "available_from": datetime(2025, 3, 10, 8, 0),
+            "due_date": datetime(2025, 3, 12, 23, 0),
+            "allow_late": True,
+            "max_score": 50,
+            "resource_url": "https://moodle.academiapro.dev/derivadas",
+        },
+        {
+            "course_key": "BD301-2025-1-A",
+            "title": "Modelo entidad-relación",
+            "assignment_type": AssignmentTypeEnum.project,
+            "instructions": "Entrega el DER y la justificación de las entidades propuestas.",
+            "available_from": datetime(2025, 3, 5, 9, 0),
+            "due_date": datetime(2025, 3, 19, 23, 30),
+            "allow_late": False,
+            "max_score": 80,
+            "attachment_url": "https://files.academiapro.dev/demo/brief-der.pdf",
+            "attachment_name": "brief-der.pdf",
+        },
+        {
+            "course_key": "PRO201-2025-1-A",
+            "title": "API mínima",
+            "assignment_type": AssignmentTypeEnum.project,
+            "instructions": "Construye una API REST con endpoints CRUD y despliegue en Render.",
+            "available_from": datetime(2025, 3, 20, 10, 0),
+            "due_date": datetime(2025, 4, 5, 23, 59),
+            "allow_late": True,
+            "max_score": 120,
+            "resource_url": "https://postman.com/academiapro/api-template",
+        },
+        {
+            "course_key": "PRO201-2025-1-A",
+            "title": "Bitácora de retrospectiva",
+            "assignment_type": AssignmentTypeEnum.homework,
+            "instructions": "Redacta las lecciones aprendidas del sprint en máximo dos páginas.",
+            "available_from": datetime(2025, 4, 6, 8, 30),
+            "due_date": datetime(2025, 4, 11, 21, 0),
+            "allow_late": False,
+            "max_score": 40,
+        },
+        {
+            "course_key": "DS501-2025-1-A",
+            "title": "Notebook de regresión",
+            "assignment_type": AssignmentTypeEnum.project,
+            "instructions": "Explora el set de precios inmobiliarios y ajusta tres modelos de regresión.",
+            "available_from": datetime(2025, 4, 1, 18, 0),
+            "due_date": datetime(2025, 4, 16, 23, 59),
+            "allow_late": True,
+            "max_score": 110,
+            "resource_url": "https://kaggle.com/datasets/academiapro/housing",
+        },
+        {
+            "course_key": "IND130-2025-1-A",
+            "title": "Mapa de procesos",
+            "assignment_type": AssignmentTypeEnum.project,
+            "instructions": "Diagramar el flujo actual de abastecimiento y proponer mejoras.",
+            "available_from": datetime(2025, 3, 18, 16, 0),
+            "due_date": datetime(2025, 3, 29, 23, 0),
+            "allow_late": False,
+            "max_score": 90,
+            "resource_url": "https://miro.com/app/board/ind130-procesos",
+        },
+    ]
+
+    mapping: Dict[str, Assignment] = {}
+    for item in data:
+        course = course_map.get(item["course_key"])
+        if not course:
+            continue
+
+        assignment = session.exec(
+            select(Assignment).where(
+                Assignment.course_id == course.id,
+                Assignment.title == item["title"],
+            )
+        ).first()
+
+        payload = {
+            "instructions": item.get("instructions"),
+            "assignment_type": item.get("assignment_type", AssignmentTypeEnum.homework),
+            "available_from": item.get("available_from"),
+            "due_date": item.get("due_date"),
+            "allow_late": item.get("allow_late", False),
+            "max_score": item.get("max_score", 100),
+            "resource_url": item.get("resource_url"),
+            "attachment_url": item.get("attachment_url"),
+            "attachment_name": item.get("attachment_name"),
+            "is_published": item.get("is_published", True),
+            "published_at": item.get("published_at") or item.get("available_from"),
+        }
+
+        if not assignment:
+            assignment = Assignment(
+                course_id=course.id,
+                teacher_id=course.teacher_id,
+                title=item["title"],
+                **payload,
+            )
+            session.add(assignment)
+            session.commit()
+            session.refresh(assignment)
+        else:
+            updated = False
+            if assignment.teacher_id != course.teacher_id:
+                assignment.teacher_id = course.teacher_id
+                updated = True
+            for field, value in payload.items():
+                if getattr(assignment, field) != value:
+                    setattr(assignment, field, value)
+                    updated = True
+            if updated:
+                session.add(assignment)
+                session.commit()
+
+        mapping[f"{item['course_key']}|{item['title']}"] = assignment
+
+    return mapping
+
+
+def _ensure_assignment_submissions(
+    session: Session,
+    assignment_map: Dict[str, Assignment],
+    enrollment_map: Dict[str, Enrollment],
+    student_map: Dict[str, Student],
+) -> None:
+    data = [
+        {
+            "assignment_key": "MAT101-2025-1-A|Guía de límites",
+            "course_key": "MAT101-2025-1-A",
+            "student_email": "estudiante1@academiapro.dev",
+            "status": SubmissionStatusEnum.graded,
+            "submitted_at": datetime(2025, 3, 7, 21, 15),
+            "text_response": "Resolución completa adjunta en PDF.",
+            "file_url": "https://files.academiapro.dev/demo/limites-cmendez.pdf",
+            "is_late": False,
+            "grade_score": 95.0,
+            "graded_at": datetime(2025, 3, 9, 10, 0),
+            "feedback": "Excelente fundamentación de cada paso.",
+        },
+        {
+            "assignment_key": "MAT101-2025-1-A|Guía de límites",
+            "course_key": "MAT101-2025-1-A",
+            "student_email": "estudiante7@academiapro.dev",
+            "status": SubmissionStatusEnum.submitted,
+            "submitted_at": datetime(2025, 3, 9, 9, 30),
+            "text_response": "Incluyo fotos del cuaderno.",
+            "file_url": "https://files.academiapro.dev/demo/limites-mcalderon.pdf",
+            "is_late": True,
+        },
+        {
+            "assignment_key": "MAT101-2025-1-A|Quiz de derivadas",
+            "course_key": "MAT101-2025-1-A",
+            "student_email": "estudiante1@academiapro.dev",
+            "status": SubmissionStatusEnum.submitted,
+            "submitted_at": datetime(2025, 3, 12, 20, 0),
+            "text_response": "Registro el intento realizado en plataforma.",
+            "external_url": "https://moodle.academiapro.dev/attempts/derivadas-001",
+            "is_late": False,
+        },
+        {
+            "assignment_key": "PRO201-2025-1-A|API mínima",
+            "course_key": "PRO201-2025-1-A",
+            "student_email": "estudiante4@academiapro.dev",
+            "status": SubmissionStatusEnum.graded,
+            "submitted_at": datetime(2025, 4, 4, 16, 0),
+            "file_url": "https://files.academiapro.dev/demo/api-demo.zip",
+            "is_late": False,
+            "grade_score": 90.0,
+            "graded_at": datetime(2025, 4, 6, 9, 0),
+            "feedback": "Funcionalidad completa, revisar logs para warnings.",
+        },
+        {
+            "assignment_key": "DS501-2025-1-A|Notebook de regresión",
+            "course_key": "DS501-2025-1-A",
+            "student_email": "estudiante3@academiapro.dev",
+            "status": SubmissionStatusEnum.returned,
+            "submitted_at": datetime(2025, 4, 15, 23, 30),
+            "file_url": "https://files.academiapro.dev/demo/regresion-salazar.ipynb",
+            "is_late": False,
+            "grade_score": 98.0,
+            "graded_at": datetime(2025, 4, 17, 12, 0),
+            "feedback": "Buen uso de validación cruzada.",
+        },
+        {
+            "assignment_key": "IND130-2025-1-A|Mapa de procesos",
+            "course_key": "IND130-2025-1-A",
+            "student_email": "estudiante13@academiapro.dev",
+            "status": SubmissionStatusEnum.graded,
+            "submitted_at": datetime(2025, 3, 28, 18, 0),
+            "file_url": "https://files.academiapro.dev/demo/mapa-procesos.pdf",
+            "is_late": False,
+            "grade_score": 78.0,
+            "graded_at": datetime(2025, 3, 30, 11, 15),
+            "feedback": "Agrega tiempos estimados al diagrama.",
+        },
+    ]
+
+    for item in data:
+        assignment = assignment_map.get(item["assignment_key"])
+        student = student_map.get(item["student_email"])
+        enrollment = enrollment_map.get(f"{item['student_email']}|{item['course_key']}")
+        if not assignment or not student or not enrollment:
+            continue
+
+        submission = session.exec(
+            select(AssignmentSubmission).where(
+                AssignmentSubmission.assignment_id == assignment.id,
+                AssignmentSubmission.enrollment_id == enrollment.id,
+            )
+        ).first()
+
+        payload = {
+            "student_id": student.id,
+            "status": item.get("status", SubmissionStatusEnum.submitted),
+            "submitted_at": item.get("submitted_at"),
+            "text_response": item.get("text_response"),
+            "file_url": item.get("file_url"),
+            "external_url": item.get("external_url"),
+            "is_late": item.get("is_late", False),
+            "grade_score": item.get("grade_score"),
+            "graded_at": item.get("graded_at"),
+            "graded_by": assignment.teacher_id,
+            "feedback": item.get("feedback"),
+        }
+
+        if not submission:
+            submission = AssignmentSubmission(
+                assignment_id=assignment.id,
+                enrollment_id=enrollment.id,
+                **payload,
+            )
+            session.add(submission)
+            session.commit()
+        else:
+            updated = False
+            for field, value in payload.items():
+                if getattr(submission, field) != value:
+                    setattr(submission, field, value)
+                    updated = True
+            if updated:
+                session.add(submission)
+                session.commit()
 
 def _ensure_evaluations(
     session: Session,

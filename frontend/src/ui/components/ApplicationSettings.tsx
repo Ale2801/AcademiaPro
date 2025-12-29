@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Button,
+  ColorInput,
   Card,
   Divider,
   Group,
@@ -10,10 +11,12 @@ import {
   Loader,
   SimpleGrid,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import {
   IconAlertTriangle,
@@ -21,10 +24,12 @@ import {
   IconDeviceFloppy,
   IconMail,
   IconPalette,
+  IconSunMoon,
   IconWorld,
 } from '@tabler/icons-react'
 
 import { api } from '../../lib/api'
+import { THEME_DEFAULTS, useAppSettingsStore } from '../../lib/settings'
 
 type SettingResponse = {
   key: string
@@ -39,7 +44,7 @@ type SettingField = {
   key: string
   label: string
   placeholder?: string
-  type?: 'text' | 'textarea' | 'color'
+  type?: 'text' | 'textarea' | 'color' | 'switch'
   helper?: string
 }
 
@@ -62,6 +67,22 @@ const settingSections: SettingSection[] = [
       { key: 'branding.tagline', label: 'Lema institucional', placeholder: 'Planifica, gestiona y escala tu campus', type: 'textarea' },
       { key: 'branding.logo_url', label: 'Logo (URL)', placeholder: 'https://...' },
       { key: 'branding.primary_color', label: 'Color primario', placeholder: '#1e40af', type: 'color', helper: 'Usa un color HEX para personalizar botones y acentos.' },
+      { key: 'branding.enable_landing', label: 'Mostrar landing predeterminada', type: 'switch', helper: 'Si está desactivado, se usará el portal personalizado o se enviará directo a la app.' },
+      { key: 'branding.portal_url', label: 'Portal público personalizado', placeholder: 'https://portal.mi-campus.edu', helper: 'Se utilizará cuando se desactive la landing interna.' },
+    ],
+  },
+  {
+    key: 'theme',
+    title: 'Paleta de colores',
+    description: 'Define la paleta base usada para modo claro y oscuro en dashboards y landing.',
+    icon: IconSunMoon,
+    fields: [
+      { key: 'theme.light_primary', label: 'Primario (modo claro)', placeholder: '#4338ca', type: 'color' },
+      { key: 'theme.light_surface', label: 'Superficie (modo claro)', placeholder: '#f8fafc', type: 'color' },
+      { key: 'theme.light_accent', label: 'Acento (modo claro)', placeholder: '#0ea5e9', type: 'color' },
+      { key: 'theme.dark_primary', label: 'Primario (modo oscuro)', placeholder: '#a5b4fc', type: 'color' },
+      { key: 'theme.dark_surface', label: 'Superficie (modo oscuro)', placeholder: '#0f172a', type: 'color' },
+      { key: 'theme.dark_accent', label: 'Acento (modo oscuro)', placeholder: '#34d399', type: 'color' },
     ],
   },
   {
@@ -105,10 +126,26 @@ export default function ApplicationSettings() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [metadata, setMetadata] = useState<Record<string, SettingResponse>>({})
+  const mergeSettings = useAppSettingsStore((state) => state.mergeValues)
 
   const brandingLogo = draft['branding.logo_url']?.trim() ?? ''
   const brandingColor = draft['branding.primary_color']?.trim() ?? ''
   const brandingName = draft['branding.app_name']?.trim() ?? 'AcademiaPro'
+  const paletteLight = {
+    primary: draft['theme.light_primary']?.trim() || THEME_DEFAULTS.light.primary,
+    surface: draft['theme.light_surface']?.trim() || THEME_DEFAULTS.light.surface,
+    accent: draft['theme.light_accent']?.trim() || THEME_DEFAULTS.light.accent,
+  }
+  const paletteDark = {
+    primary: draft['theme.dark_primary']?.trim() || THEME_DEFAULTS.dark.primary,
+    surface: draft['theme.dark_surface']?.trim() || THEME_DEFAULTS.dark.surface,
+    accent: draft['theme.dark_accent']?.trim() || THEME_DEFAULTS.dark.accent,
+  }
+  const paletteSwatchOrder: Array<{ key: keyof typeof paletteLight; label: string }> = [
+    { key: 'primary', label: 'Primario' },
+    { key: 'surface', label: 'Superficie' },
+    { key: 'accent', label: 'Acento' },
+  ]
 
   useEffect(() => {
     let cancelled = false
@@ -129,6 +166,12 @@ export default function ApplicationSettings() {
         setDraft(nextDraft)
         setInitialValues({ ...nextDraft })
         setDirtyKeys(new Set())
+        const loadedCategories = Array.from(new Set(
+          data
+            .map((item) => item.category)
+            .filter((category): category is string => Boolean(category))
+        ))
+        mergeSettings(nextDraft, { markAsLoaded: true, categories: loadedCategories })
       } catch (e: any) {
         if (cancelled) return
         const detail = e?.response?.data?.detail || e?.message || 'No se pudieron cargar los ajustes institucionales.'
@@ -144,7 +187,7 @@ export default function ApplicationSettings() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [mergeSettings])
 
   const handleChange = useCallback((key: string, value: string) => {
     setDraft((prev) => ({ ...prev, [key]: value }))
@@ -171,19 +214,27 @@ export default function ApplicationSettings() {
         await api.put(`/settings/${encodeURIComponent(key)}`, { value: draft[key] })
       }
       const updatedInitial = { ...initialValues }
+      const mergedEntries: Record<string, string> = {}
       keysToUpdate.forEach((key) => {
         updatedInitial[key] = draft[key]
+        mergedEntries[key] = draft[key] ?? ''
       })
       setInitialValues(updatedInitial)
       setDirtyKeys(new Set())
       setSuccess('Ajustes guardados correctamente.')
+      const updatedCategories = Array.from(new Set(
+        keysToUpdate
+          .map((key) => metadata[key]?.category)
+          .filter((category): category is string => Boolean(category))
+      ))
+      mergeSettings(mergedEntries, { markAsLoaded: true, categories: updatedCategories })
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudieron guardar los ajustes.'
       setError(detail)
     } finally {
       setSaving(false)
     }
-  }, [dirtyKeys, draft, initialValues])
+  }, [dirtyKeys, draft, initialValues, mergeSettings])
 
   const isDirty = dirtyKeys.size > 0
 
@@ -193,6 +244,92 @@ export default function ApplicationSettings() {
     }
     return brandingColor
   }, [brandingColor])
+
+  const renderFieldControl = useCallback((field: SettingField) => {
+    const value = draft[field.key] ?? ''
+    const description = metadata[field.key]?.description ?? field.helper
+    if (field.type === 'textarea') {
+      return (
+        <Stack key={field.key} gap={4}>
+          <Textarea
+            label={field.label}
+            autosize
+            minRows={2}
+            placeholder={field.placeholder}
+            value={value}
+            onChange={(event) => handleChange(field.key, event.currentTarget.value)}
+          />
+          {description ? (
+            <Text size="xs" c="dimmed">{description}</Text>
+          ) : null}
+        </Stack>
+      )
+    }
+    if (field.type === 'color') {
+      return (
+        <Stack key={field.key} gap={4}>
+          <ColorInput
+            label={field.label}
+            placeholder={field.placeholder}
+            value={value}
+            onChange={(color) => handleChange(field.key, color || '')}
+            format="hex"
+            disallowInput={false}
+            withEyeDropper
+            swatches={[
+              '#1e3a8a', '#4338ca', '#4c1d95', '#0891b2', '#0ea5e9', '#14b8a6',
+              '#0f172a', '#1e293b', '#475569', '#94a3b8', '#f8fafc', '#ffffff',
+            ]}
+          />
+          {description ? (
+            <Text size="xs" c="dimmed">{description}</Text>
+          ) : null}
+        </Stack>
+      )
+    }
+    if (field.type === 'switch') {
+      const checked = value !== 'false'
+      return (
+        <Stack key={field.key} gap={4}>
+          <Switch
+            label={field.label}
+            checked={checked}
+            onChange={(event) => handleChange(field.key, event.currentTarget.checked ? 'true' : 'false')}
+          />
+          {description ? (
+            <Text size="xs" c="dimmed">{description}</Text>
+          ) : null}
+        </Stack>
+      )
+    }
+    return (
+      <Stack key={field.key} gap={4}>
+        <TextInput
+          label={field.label}
+          placeholder={field.placeholder}
+          value={value}
+          onChange={(event) => handleChange(field.key, event.currentTarget.value)}
+        />
+        {description ? (
+          <Text size="xs" c="dimmed">{description}</Text>
+        ) : null}
+      </Stack>
+    )
+  }, [draft, handleChange, metadata])
+
+  const resetThemePalette = useCallback(() => {
+    const defaults: Record<string, string> = {
+      'theme.light_primary': THEME_DEFAULTS.light.primary,
+      'theme.light_surface': THEME_DEFAULTS.light.surface,
+      'theme.light_accent': THEME_DEFAULTS.light.accent,
+      'theme.dark_primary': THEME_DEFAULTS.dark.primary,
+      'theme.dark_surface': THEME_DEFAULTS.dark.surface,
+      'theme.dark_accent': THEME_DEFAULTS.dark.accent,
+    }
+    Object.entries(defaults).forEach(([key, value]) => {
+      handleChange(key, value)
+    })
+  }, [handleChange])
 
   if (loading) {
     return (
@@ -220,7 +357,7 @@ export default function ApplicationSettings() {
 
       <Card withBorder radius="lg" padding="lg">
         <Stack gap="md">
-          <Group justify="space-between" align="center">
+          <Group justify="space-between" align="center" gap="lg" wrap="wrap">
             <div>
               <Text size="xs" tt="uppercase" c="dimmed" fw={600}>
                 Identidad institucional activa
@@ -230,7 +367,7 @@ export default function ApplicationSettings() {
                 Lo que configures aquí se replica en dashboards, landing pages y notificaciones por correo.
               </Text>
             </div>
-            <Stack gap="xs" align="center">
+            <Stack gap="xs" align="stretch" w={{ base: '100%', sm: 'auto' }}>
               {brandingLogo ? (
                 <Image src={brandingLogo} alt="Logo institucional" width={180} radius="md" />
               ) : (
@@ -245,6 +382,33 @@ export default function ApplicationSettings() {
                   <Text size="xs" c="dimmed">{colorPreview}</Text>
                 </Group>
               ) : null}
+              <Card withBorder padding="sm" radius="md">
+                <Stack gap={6}>
+                  <Text size="xs" c="dimmed" fw={600}>Paleta activa</Text>
+                  {[
+                    { label: 'Modo claro', palette: paletteLight },
+                    { label: 'Modo oscuro', palette: paletteDark },
+                  ].map((entry) => (
+                    <Stack key={entry.label} gap={4}>
+                      <Text size="xs" fw={600}>{entry.label}</Text>
+                      <Group gap={6} wrap="nowrap">
+                        {paletteSwatchOrder.map(({ key, label }) => {
+                          const value = entry.palette[key]
+                          return (
+                            <Tooltip key={`${entry.label}-${key}`} label={`${label}: ${value}`} withinPortal>
+                              <Card
+                                radius="sm"
+                                padding={0}
+                                style={{ backgroundColor: value, width: 32, height: 18, border: '1px solid rgba(0,0,0,0.08)' }}
+                              />
+                            </Tooltip>
+                          )
+                        })}
+                      </Group>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Card>
             </Stack>
           </Group>
           <Divider />
@@ -280,48 +444,34 @@ export default function ApplicationSettings() {
                   {dirtyCount} cambio{dirtyCount === 1 ? '' : 's'}
                 </Badge>
               </Group>
-              <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-                {section.fields.map((field) => {
-                  const value = draft[field.key] ?? ''
-                  const description = metadata[field.key]?.description ?? field.helper
-                  const onChange = (event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-                    handleChange(field.key, event.currentTarget.value)
-                  }
-                  if (field.type === 'textarea') {
-                    return (
-                      <Stack key={field.key} gap={4}>
-                        <Textarea
-                          label={field.label}
-                          autosize
-                          minRows={2}
-                          placeholder={field.placeholder}
-                          value={value}
-                          onChange={onChange}
-                        />
-                        {description ? (
-                          <Text size="xs" c="dimmed">{description}</Text>
-                        ) : null}
+              {section.key === 'theme' ? (
+                <Stack gap="md">
+                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+                    {[
+                      { label: 'Modo claro', prefix: 'theme.light_' },
+                      { label: 'Modo oscuro', prefix: 'theme.dark_' },
+                    ].map(({ label, prefix }) => (
+                      <Stack key={prefix} gap="sm">
+                        <Text fw={600}>{label}</Text>
+                        <Stack gap="sm">
+                          {section.fields
+                            .filter((field) => field.key.startsWith(prefix))
+                            .map((field) => renderFieldControl(field))}
+                        </Stack>
                       </Stack>
-                    )
-                  }
-                  return (
-                    <Stack key={field.key} gap={4}>
-                      <TextInput
-                        label={field.label}
-                        placeholder={field.placeholder}
-                        value={value}
-                        onChange={onChange}
-                        rightSection={field.type === 'color' && value ? (
-                          <Card radius="sm" padding={0} style={{ backgroundColor: value, width: 24, height: 16 }} />
-                        ) : undefined}
-                      />
-                      {description ? (
-                        <Text size="xs" c="dimmed">{description}</Text>
-                      ) : null}
-                    </Stack>
-                  )
-                })}
-              </SimpleGrid>
+                    ))}
+                  </SimpleGrid>
+                  <Group justify="flex-end">
+                    <Button variant="outline" size="xs" onClick={resetThemePalette}>
+                      Restablecer paleta predeterminada
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : (
+                <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                  {section.fields.map((field) => renderFieldControl(field))}
+                </SimpleGrid>
+              )}
             </Stack>
           </Card>
         )

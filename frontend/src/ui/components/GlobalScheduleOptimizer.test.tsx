@@ -202,4 +202,54 @@ describe('GlobalScheduleOptimizer', () => {
     expect(screen.getByText('No se pudo aplicar la propuesta global')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aplicar propuesta global' })).toBeInTheDocument()
   })
+
+  it('muestra métricas de desempeño y diagnósticos del optimizador global', async () => {
+    renderOptimizer()
+
+    await waitFor(() => expect(getMock).toHaveBeenCalledWith('/programs/'))
+
+    postMock.mockImplementationOnce((path: string) => {
+      expect(path).toBe('/schedule/optimize')
+      return Promise.resolve({
+        data: {
+          assignments: [
+            {
+              course_id: sampleCourse.id,
+              room_id: sampleRoom.id,
+              timeslot_id: sampleTimeslot.id,
+              duration_minutes: 90,
+              start_offset_minutes: 0,
+            },
+          ],
+          unassigned: [{ course_id: sampleCourse.id, remaining_minutes: 45 }],
+          quality_metrics: sampleQualityMetrics,
+          performance_metrics: {
+            runtime_seconds: 0.789,
+            requested_courses: 1,
+            assigned_courses: 1,
+            requested_minutes: 180,
+            assigned_minutes: 135,
+            fill_rate: 0.75,
+          },
+          diagnostics: {
+            messages: ['Ejecución completada en 0.789 s.', 'Se asignaron 1 de 1 cursos solicitados.'],
+            unassigned_causes: {
+              [String(sampleCourse.id)]: 'El docente ya tenía compromisos en todos sus bloques disponibles.',
+            },
+          },
+        },
+      })
+    })
+
+    const runButton = await screen.findByRole('button', { name: /Optimizar horarios globales/i })
+    fireEvent.click(runButton)
+
+    await waitFor(() => expect(screen.getByText(/Desempeño del optimizador global/i)).toBeInTheDocument())
+    expect(screen.getByText(/Cobertura 75.0%/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/0.789 s/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Ejecución completada en 0.789 s\./i)).toBeInTheDocument()
+    expect(screen.getAllByText(/El docente ya tenía compromisos/i).length).toBeGreaterThan(0)
+    expect(screen.getByText('Causas principales detectadas')).toBeInTheDocument()
+    expect(screen.getByText(/El docente ya tenía compromisos en todos sus bloques disponibles\. · 1 curso/i)).toBeInTheDocument()
+  })
 })

@@ -3,8 +3,9 @@ from typing import List, Optional
 from sqlmodel import select
 
 from ..db import get_session
-from ..models import Course, ProgramSemester
+from ..models import Course, ProgramSemester, Enrollment
 from ..security import require_roles
+from ..utils.course_access import ensure_course_access, require_teacher, require_student
 from ..utils.sqlmodel_helpers import apply_partial_update
 
 
@@ -20,6 +21,16 @@ def list_courses(
     stmt = select(Course)
     if program_semester_id is not None:
         stmt = stmt.where(Course.program_semester_id == program_semester_id)
+    if user.role == "teacher":
+        teacher = require_teacher(session, user)
+        stmt = stmt.where(Course.teacher_id == teacher.id)
+    elif user.role == "student":
+        student = require_student(session, user)
+        stmt = (
+            stmt.join(Enrollment, Enrollment.course_id == Course.id)
+            .where(Enrollment.student_id == student.id)
+            .distinct()
+        )
     return session.exec(stmt).all()
 
 
@@ -39,6 +50,7 @@ def get_course(course_id: int, session=Depends(get_session), user=Depends(requir
     obj = session.get(Course, course_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
+    ensure_course_access(session, user, obj.id)
     return obj
 
 

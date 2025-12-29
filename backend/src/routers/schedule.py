@@ -384,6 +384,20 @@ def optimize(
         for course_id, minutes in result.unassigned.items()
     ]
 
+    performance_payload = {
+        "runtime_seconds": result.performance_metrics.runtime_seconds,
+        "requested_courses": result.performance_metrics.requested_courses,
+        "assigned_courses": result.performance_metrics.assigned_courses,
+        "requested_minutes": result.performance_metrics.requested_minutes,
+        "assigned_minutes": result.performance_metrics.assigned_minutes,
+        "fill_rate": result.performance_metrics.fill_rate,
+    }
+
+    diagnostics_payload = {
+        "messages": list(result.diagnostics.messages),
+        "unassigned_causes": result.diagnostics.unassigned_causes,
+    }
+
     return {
         "assignments": assignments_payload,
         "unassigned": unassigned_payload,
@@ -400,6 +414,8 @@ def optimize(
             "timeslot_utilization": result.quality_metrics.timeslot_utilization,
             "unassigned_count": result.quality_metrics.unassigned_count,
         },
+        "performance_metrics": performance_payload,
+        "diagnostics": diagnostics_payload,
     }
 
 

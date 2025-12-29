@@ -152,10 +152,26 @@ type QualityMetrics = {
   unassigned_count: number
 }
 
+type PerformanceMetrics = {
+  runtime_seconds: number
+  requested_courses: number
+  assigned_courses: number
+  requested_minutes: number
+  assigned_minutes: number
+  fill_rate: number
+}
+
+type OptimizerDiagnostics = {
+  messages?: string[]
+  unassigned_causes?: Record<string, string>
+}
+
 type OptimizerResponse = {
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
   quality_metrics?: QualityMetrics
+  performance_metrics?: PerformanceMetrics
+  diagnostics?: OptimizerDiagnostics
 }
 
 type StatCard = {
@@ -209,6 +225,8 @@ export default function GlobalScheduleOptimizer() {
   const [optimizerAssignments, setOptimizerAssignments] = useState<OptimizerAssignment[]>([])
   const [unassigned, setUnassigned] = useState<OptimizerUnassigned[]>([])
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
+  const [diagnostics, setDiagnostics] = useState<OptimizerDiagnostics | null>(null)
 
   const [maxDailyHours, setMaxDailyHours] = useState(6)
   const [saving, setSaving] = useState(false)
@@ -239,6 +257,8 @@ export default function GlobalScheduleOptimizer() {
   setOptimizerAssignments([])
       setUnassigned([])
       setQualityMetrics(null)
+      setPerformanceMetrics(null)
+      setDiagnostics(null)
       setSuccess(null)
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudieron cargar los catálogos globales'
@@ -414,6 +434,8 @@ export default function GlobalScheduleOptimizer() {
     setError(null)
     setSuccess(null)
     setQualityMetrics(null)
+    setPerformanceMetrics(null)
+    setDiagnostics(null)
 
     try {
       const coursesPayload = filteredCourses.map((course) => ({
@@ -493,6 +515,8 @@ export default function GlobalScheduleOptimizer() {
       setPreviewEntries(entries)
       setUnassigned(data.unassigned ?? [])
       setQualityMetrics(data.quality_metrics ?? null)
+      setPerformanceMetrics(data.performance_metrics ?? null)
+      setDiagnostics(data.diagnostics ?? null)
 
       const assignmentCount = entries.length
       const assignmentLabel = assignmentCount === 1 ? 'bloque' : 'bloques'
@@ -589,7 +613,38 @@ export default function GlobalScheduleOptimizer() {
       .sort((a, b) => a.programLabel.localeCompare(b.programLabel, 'es', { numeric: true }))
   }, [previewEntries, programMap, semesterMap])
 
+  const resolvedGlobalCauses = useMemo(() => {
+    if (!diagnostics || !diagnostics.unassigned_causes) return []
+    return Object.entries(diagnostics.unassigned_causes).map(([courseId, reason]) => {
+      const numericId = Number(courseId)
+      const course = courseMap.get(numericId)
+      const subjectName = course ? subjectMap.get(course.subject_id) : undefined
+      const parts: string[] = []
+      if (subjectName) parts.push(subjectName)
+      if (course?.group) parts.push(`Grupo ${course.group}`)
+      const label = parts.length > 0 ? parts.join(' · ') : `Curso #${courseId}`
+      return { courseId: numericId, label, reason }
+    })
+  }, [diagnostics, courseMap, subjectMap])
+
+  const aggregatedGlobalCauses = useMemo(() => {
+    if (!diagnostics || !diagnostics.unassigned_causes) return []
+    const counts = new Map<string, number>()
+    for (const cause of Object.values(diagnostics.unassigned_causes)) {
+      counts.set(cause, (counts.get(cause) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .map(([cause, count]) => ({ cause, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [diagnostics])
+
+  const formatCauseCountLabel = (count: number) => (count === 1 ? '1 curso' : `${count} cursos`)
+
   const runDisabled = optimizerLoading || loading || filteredCourses.length === 0 || rooms.length === 0 || timeslots.length === 0
+  const hasPerformanceInsights = Boolean(
+    performanceMetrics ||
+      (diagnostics && ((diagnostics.messages?.length ?? 0) > 0 || (diagnostics.unassigned_causes && Object.keys(diagnostics.unassigned_causes).length > 0)))
+  )
 
   const applyProposal = useCallback(async () => {
     if (optimizerAssignments.length === 0) {
@@ -615,6 +670,8 @@ export default function GlobalScheduleOptimizer() {
       setOptimizerAssignments([])
       setUnassigned([])
       setQualityMetrics(null)
+      setPerformanceMetrics(null)
+      setDiagnostics(null)
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo aplicar la propuesta global'
       setError(detail)
@@ -873,6 +930,97 @@ export default function GlobalScheduleOptimizer() {
                 </Card>
               ))}
             </SimpleGrid>
+          </Stack>
+        </Card>
+      ) : null}
+
+      {hasPerformanceInsights ? (
+        <Card withBorder radius="lg" padding="lg">
+          <Stack gap="md">
+            {performanceMetrics ? (
+              <>
+                <Group justify="space-between" align="center">
+                  <Text fw={600}>Desempeño del optimizador global</Text>
+                  <Badge color="indigo" variant="light">
+                    Cobertura {(performanceMetrics.fill_rate * 100).toFixed(1)}%
+                  </Badge>
+                </Group>
+                <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
+                  <Card withBorder radius="md" padding="md">
+                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                      Tiempo de ejecución
+                    </Text>
+                    <Title order={4} mt={4}>
+                      {performanceMetrics.runtime_seconds.toFixed(3)} s
+                    </Title>
+                  </Card>
+                  <Card withBorder radius="md" padding="md">
+                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                      Cursos cubiertos
+                    </Text>
+                    <Title order={4} mt={4}>
+                      {performanceMetrics.assigned_courses}/{performanceMetrics.requested_courses}
+                    </Title>
+                  </Card>
+                  <Card withBorder radius="md" padding="md">
+                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                      Carga asignada
+                    </Text>
+                    <Title order={4} mt={4}>
+                      {formatMinutesLabel(performanceMetrics.assigned_minutes)} / {formatMinutesLabel(performanceMetrics.requested_minutes)}
+                    </Title>
+                  </Card>
+                  <Card withBorder radius="md" padding="md">
+                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                      Cobertura de horas
+                    </Text>
+                    <Title order={4} mt={4}>
+                      {(performanceMetrics.fill_rate * 100).toFixed(1)}%
+                    </Title>
+                  </Card>
+                </SimpleGrid>
+              </>
+            ) : null}
+
+            {diagnostics?.messages && diagnostics.messages.length > 0 ? (
+              <Alert color="indigo" variant="light">
+                <Stack gap={4}>
+                  {diagnostics.messages.map((message, index) => (
+                    <Text size="sm" key={`global-diag-${index}`}>
+                      {message}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            ) : null}
+
+            {aggregatedGlobalCauses.length > 0 ? (
+              <Alert color="yellow" variant="light">
+                <Stack gap={4}>
+                  <Text fw={600}>Causas principales detectadas</Text>
+                  {aggregatedGlobalCauses.slice(0, 3).map((item, index) => (
+                    <Text size="sm" key={`global-cause-summary-${index}`}>
+                      {item.cause} · {formatCauseCountLabel(item.count)}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            ) : null}
+
+            {resolvedGlobalCauses.length > 0 ? (
+              <Alert color="orange" variant="light">
+                <Stack gap={4}>
+                  {resolvedGlobalCauses.map((item) => (
+                    <div key={`global-cause-${item.courseId}`}>
+                      <Text fw={600}>{item.label}</Text>
+                      <Text size="sm" c="dimmed">
+                        {item.reason}
+                      </Text>
+                    </div>
+                  ))}
+                </Stack>
+              </Alert>
+            ) : null}
           </Stack>
         </Card>
       ) : null}
