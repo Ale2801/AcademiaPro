@@ -2,6 +2,14 @@ from typing import Dict, Any
 
 from fastapi.testclient import TestClient
 
+from src.scheduler.optimizer import (
+    Constraints,
+    CourseInput,
+    RoomInput,
+    TimeslotInput,
+    solve_schedule,
+)
+
 
 def _auth_headers(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -229,6 +237,68 @@ def test_scheduler_optimize_basic(client: TestClient, admin_token: str):
     assert total_minutes == 120
     assert {item["timeslot_id"] for item in assignments} <= {slot_one["id"], slot_two["id"]}
 
+    performance = data["performance_metrics"]
+    assert performance["requested_courses"] == 1
+    assert performance["assigned_courses"] == 1
+    assert performance["requested_minutes"] == 120
+    assert performance["assigned_minutes"] == 120
+    diagnostics = data["diagnostics"]
+    assert isinstance(diagnostics.get("messages"), list)
+    assert diagnostics["messages"]
+
+
+def test_scheduler_reports_unassigned_diagnostics(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    course = entities["course"]
+    room = entities["room"]
+    slot = entities["timeslot"]
+
+    payload = {
+        "courses": [
+            {
+                "course_id": course["id"],
+                "teacher_id": course["teacher_id"],
+                "weekly_hours": 2,
+            }
+        ],
+        "rooms": [
+            {
+                "room_id": room["id"],
+                "capacity": room.get("capacity", 30),
+            }
+        ],
+        "timeslots": [
+            {"timeslot_id": slot["id"], "day": slot["day_of_week"], "block": 1},
+        ],
+        "constraints": {
+            "teacher_availability": {
+                course["teacher_id"]: [],
+            }
+        },
+    }
+
+    response = client.post("/schedule/optimize", json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["assignments"] == []
+    assert data["unassigned"][0]["course_id"] == course["id"]
+
+    performance = data["performance_metrics"]
+    assert performance["requested_courses"] == 1
+    assert performance["assigned_courses"] == 0
+
+    diagnostics = data["diagnostics"]
+    unassigned_causes = diagnostics.get("unassigned_causes", {})
+    normalized_causes = {int(key): value for key, value in unassigned_causes.items()}
+    assert course["id"] in normalized_causes
+    assert "Sin bloques" in normalized_causes[course["id"]]
+    assert any(
+        "Causas principales" in message
+        for message in diagnostics.get("messages", [])
+    )
+
 
 def test_scheduler_respects_min_gap(client: TestClient, admin_token: str):
     headers = _auth_headers(admin_token)
@@ -420,6 +490,90 @@ def test_optimizer_does_not_split_course_across_rooms(client: TestClient, admin_
         remaining = next((item for item in data["unassigned"] if item["course_id"] == course["id"]), None)
         assert remaining is not None
         assert remaining["remaining_minutes"] == 120
+
+
+def test_scheduler_teacher_rebalance_retry():
+    courses = [
+        CourseInput(course_id=1, teacher_id=200, weekly_hours=1, program_semester_id=1),
+        CourseInput(course_id=2, teacher_id=200, weekly_hours=1, program_semester_id=2),
+        CourseInput(course_id=3, teacher_id=100, weekly_hours=1, program_semester_id=3),
+        CourseInput(course_id=4, teacher_id=100, weekly_hours=1, program_semester_id=4),
+    ]
+
+    rooms = [RoomInput(room_id=1, capacity=30)]
+    timeslots = [
+        TimeslotInput(
+            timeslot_id=idx + 1,
+            day=0,
+            block=idx,
+            start_minutes=8 * 60 + idx * 60,
+            duration_minutes=60,
+        )
+        for idx in range(4)
+    ]
+    constraints = Constraints(
+        teacher_availability={
+            200: [1, 2],
+            100: [1, 2, 3, 4],
+        }
+    )
+
+    result = solve_schedule(courses, rooms, timeslots, constraints)
+
+    assert result.performance_metrics.assigned_courses == len(courses)
+    assert len(result.unassigned) == 0
+    retry_hint = "Se aplicaron intentos adicionales"
+    assert any(retry_hint in message for message in result.diagnostics.messages)
+
+
+def test_scheduler_respects_teacher_conflicts_constraint(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    course = entities["course"]
+    room = entities["room"]
+
+    slot_conflict = _ensure_timeslot_at(client, headers, day_of_week=2, start_time="08:00", end_time="09:00")
+    slot_allowed = _ensure_timeslot_at(client, headers, day_of_week=2, start_time="09:00", end_time="10:00")
+
+    payload = {
+        "courses": [
+            {
+                "course_id": course["id"],
+                "teacher_id": course["teacher_id"],
+                "weekly_hours": 2,
+            }
+        ],
+        "rooms": [
+            {
+                "room_id": room["id"],
+                "capacity": room.get("capacity", 30),
+            }
+        ],
+        "timeslots": [
+            {"timeslot_id": slot_conflict["id"], "day": slot_conflict["day_of_week"], "block": 1},
+            {"timeslot_id": slot_allowed["id"], "day": slot_allowed["day_of_week"], "block": 2},
+        ],
+        "constraints": {
+            "teacher_availability": {
+                course["teacher_id"]: [slot_conflict["id"], slot_allowed["id"]],
+            },
+            "teacher_conflicts": {
+                course["teacher_id"]: [slot_conflict["id"]],
+            },
+        },
+    }
+
+    response = client.post("/schedule/optimize", json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assigned_slots = {item["timeslot_id"] for item in data["assignments"] if item["course_id"] == course["id"]}
+    assert slot_conflict["id"] not in assigned_slots
+    assert slot_allowed["id"] in assigned_slots
+
+    unassigned = next((item for item in data.get("unassigned", []) if item["course_id"] == course["id"]), None)
+    assert unassigned is not None
+    assert unassigned["remaining_minutes"] == 60
 
 
 def test_save_assignments_persists_schedule(client: TestClient, admin_token: str):

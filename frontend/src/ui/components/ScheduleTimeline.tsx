@@ -14,6 +14,7 @@ export type ScheduleEntry = {
   end_time?: string | null
   duration_minutes?: number | null
   start_offset_minutes?: number | null
+  teacher_id?: number | null
   teacher_name?: string | null
   timeslot_id?: number | null
   program_semester_id?: number | null

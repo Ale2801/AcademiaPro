@@ -160,10 +160,26 @@ type QualityMetrics = {
   unassigned_count: number
 }
 
+type PerformanceMetrics = {
+  runtime_seconds: number
+  requested_courses: number
+  assigned_courses: number
+  requested_minutes: number
+  assigned_minutes: number
+  fill_rate: number
+}
+
+type OptimizerDiagnostics = {
+  messages?: string[]
+  unassigned_causes?: Record<string, string>
+}
+
 type OptimizerResponse = {
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
   quality_metrics?: QualityMetrics
+  performance_metrics?: PerformanceMetrics
+  diagnostics?: OptimizerDiagnostics
 }
 
 type PlannerDialog =
@@ -251,6 +267,8 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
 
   const [maxDailyHours, setMaxDailyHours] = useState(6)
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
+  const [diagnostics, setDiagnostics] = useState<OptimizerDiagnostics | null>(null)
 
   const [selectedCourseForStudents, setSelectedCourseForStudents] = useState<string | null>(null)
   const [selectedStudents, setSelectedStudents] = useState<string[]>([])
@@ -1060,6 +1078,15 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     return map
   }, [courseSummaries, courses])
 
+  const resolvedUnassignedCauses = useMemo(() => {
+    if (!diagnostics || !diagnostics.unassigned_causes) return []
+    return Object.entries(diagnostics.unassigned_causes).map(([courseId, reason]) => {
+      const numericId = Number(courseId)
+      const label = courseLookup.get(numericId)?.label ?? `Curso #${courseId}`
+      return { courseId: numericId, label, reason }
+    })
+  }, [diagnostics, courseLookup])
+
   const dialogCourseLabel = useMemo(() => {
     if (!dialog) return ''
     if (dialog.type === 'create') {
@@ -1077,6 +1104,8 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     setError(null)
     setSuccess(null)
     setQualityMetrics(null)
+    setPerformanceMetrics(null)
+    setDiagnostics(null)
     try {
       const coursesPayload = courses.map((course) => ({
         course_id: course.id,
@@ -1097,6 +1126,27 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
         }
       }
 
+      const requestCourseIds = new Set(coursesPayload.map((course) => course.course_id))
+      const timeslotUniverse = new Set(timeslotPayload.map((slot) => slot.timeslot_id))
+      const conflictEntries = globalSchedule.length > 0 ? globalSchedule : schedule
+      const teacherConflictSets = new Map<number, Set<number>>()
+      for (const entry of conflictEntries) {
+        if (!entry.teacher_id || entry.teacher_id < 0) continue
+        if (!entry.timeslot_id || !timeslotUniverse.has(entry.timeslot_id)) continue
+        if (requestCourseIds.has(entry.course_id)) continue
+        const slotSet = teacherConflictSets.get(entry.teacher_id) ?? new Set<number>()
+        slotSet.add(entry.timeslot_id)
+        teacherConflictSets.set(entry.teacher_id, slotSet)
+      }
+      const teacherConflicts: Record<number, number[]> | null = teacherConflictSets.size
+        ? Array.from(teacherConflictSets.entries()).reduce((acc, [teacherId, slots]) => {
+            if (slots.size > 0) {
+              acc[teacherId] = Array.from(slots)
+            }
+            return acc
+          }, {} as Record<number, number[]>)
+        : null
+
       const payload = {
         courses: coursesPayload,
         rooms: roomsPayload,
@@ -1104,6 +1154,7 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
         constraints: {
           teacher_availability: availability,
           max_daily_hours_per_program: maxDailyHours,
+          ...(teacherConflicts ? { teacher_conflicts: teacherConflicts } : {}),
         },
       }
 
@@ -1148,10 +1199,12 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       setOptimizerAssignments(parsedAssignments)
       setOptimizerPreview(preview)
       
-      // Guardar métricas de calidad si están disponibles
+      // Guardar métricas de calidad y rendimiento si están disponibles
       if (data.quality_metrics) {
         setQualityMetrics(data.quality_metrics)
       }
+      setPerformanceMetrics(data.performance_metrics ?? null)
+      setDiagnostics(data.diagnostics ?? null)
       
       const unassigned = data.unassigned ?? []
       if (unassigned.length > 0) {
@@ -1171,7 +1224,22 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     } finally {
       setOptimizerLoading(false)
     }
-  }, [selectedSemester, courses, rooms, buildTimeslotBlocks, maxDailyHours, courseMap, courseLookup, timeslotMap, roomMap, subjectMap, userMap, teacherMap])
+  }, [
+    selectedSemester,
+    courses,
+    rooms,
+    buildTimeslotBlocks,
+    maxDailyHours,
+    courseMap,
+    courseLookup,
+    timeslotMap,
+    roomMap,
+    subjectMap,
+    userMap,
+    teacherMap,
+    globalSchedule,
+    schedule,
+  ])
 
   const handleApplyOptimized = useCallback(async () => {
     if (optimizerAssignments.length === 0) return
@@ -1348,6 +1416,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
   }, [dialog, dialogRoom, dialogTimeslot, dialogDuration, dialogOffset, loadSemesterData, selectedSemester])
 
   const totalAssignments = schedule.length
+  const hasOptimizerInsights = Boolean(
+    qualityMetrics ||
+      performanceMetrics ||
+      (diagnostics && ((diagnostics.messages?.length ?? 0) > 0 || (diagnostics.unassigned_causes && Object.keys(diagnostics.unassigned_causes).length > 0)))
+  )
   const dialogAvailability = useMemo(() => {
     if (!dialog || !dialogRoom || !dialogTimeslot) return null
     const roomIdNum = Number(dialogRoom)
@@ -1816,53 +1889,116 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
             )}
           </Group>
 
-          {qualityMetrics && (
-            <Card 
-              withBorder 
-              radius="md" 
-              padding="md" 
-              bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'} 
+          {hasOptimizerInsights && (
+            <Card
+              withBorder
+              radius="md"
+              padding="md"
+              bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'}
               style={{ borderColor: theme.colors.teal[colorScheme === 'dark' ? 4 : 3] }}
             >
               <Stack gap="sm">
-                <Group justify="space-between">
-                  <Text size="sm" fw={600} c={colorScheme === 'dark' ? 'teal.4' : 'teal.7'}>
-                    Métricas de Calidad del Horario
-                  </Text>
-                  <Badge color="teal" variant="light">
-                    Score: {Math.round(qualityMetrics.balance_score ?? 0)}/100
-                  </Badge>
-                </Group>
-                <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
-                  <div>
-                    <Text size="xs" c="dimmed">Asignados</Text>
-                    <Text size="sm" fw={500}>{qualityMetrics.total_assigned ?? 0}</Text>
-                  </div>
-                  <div>
-                    <Text size="xs" c="dimmed">Carga promedio</Text>
-                    <Text size="sm" fw={500}>{qualityMetrics.avg_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
-                  </div>
-                  <div>
-                    <Text size="xs" c="dimmed">Carga máxima</Text>
-                    <Text size="sm" fw={500}>{qualityMetrics.max_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
-                  </div>
-                  <div>
-                    <Text size="xs" c="dimmed">Utilización</Text>
-                    <Text size="sm" fw={500}>{qualityMetrics.timeslot_utilization ? (qualityMetrics.timeslot_utilization * 100).toFixed(0) : '0'}%</Text>
-                  </div>
-                </SimpleGrid>
-                {(qualityMetrics.daily_overload_count ?? 0) > 0 && (
-                  <Alert color="yellow" variant="light" p="xs">
-                    <Text size="xs">
-                      ⚠️ {qualityMetrics.daily_overload_count} día(s) exceden el límite de {maxDailyHours}h
-                    </Text>
+                {qualityMetrics && (
+                  <>
+                    <Group justify="space-between">
+                      <Text size="sm" fw={600} c={colorScheme === 'dark' ? 'teal.4' : 'teal.7'}>
+                        Métricas de Calidad del Horario
+                      </Text>
+                      <Badge color="teal" variant="light">
+                        Score: {Math.round(qualityMetrics.balance_score ?? 0)}/100
+                      </Badge>
+                    </Group>
+                    <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+                      <div>
+                        <Text size="xs" c="dimmed">Asignados</Text>
+                        <Text size="sm" fw={500}>{qualityMetrics.total_assigned ?? 0}</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Carga promedio</Text>
+                        <Text size="sm" fw={500}>{qualityMetrics.avg_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Carga máxima</Text>
+                        <Text size="sm" fw={500}>{qualityMetrics.max_daily_load?.toFixed(1) ?? '0.0'}h/día</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Utilización</Text>
+                        <Text size="sm" fw={500}>{qualityMetrics.timeslot_utilization ? (qualityMetrics.timeslot_utilization * 100).toFixed(0) : '0'}%</Text>
+                      </div>
+                    </SimpleGrid>
+                    {(qualityMetrics.daily_overload_count ?? 0) > 0 && (
+                      <Alert color="yellow" variant="light" p="xs">
+                        <Text size="xs">
+                          ⚠️ {qualityMetrics.daily_overload_count} día(s) exceden el límite de {maxDailyHours}h
+                        </Text>
+                      </Alert>
+                    )}
+                    {(qualityMetrics.unassigned_count ?? 0) > 0 && (
+                      <Alert color="orange" variant="light" p="xs">
+                        <Text size="xs">
+                          ⚠️ {qualityMetrics.unassigned_count} curso(s) no pudieron asignarse completamente
+                        </Text>
+                      </Alert>
+                    )}
+                  </>
+                )}
+
+                {performanceMetrics && (
+                  <>
+                    {qualityMetrics && <Divider my="xs" variant="dashed" />}
+                    <Group justify="space-between">
+                      <Text size="sm" fw={600} c={colorScheme === 'dark' ? 'teal.4' : 'teal.7'}>
+                        Desempeño del optimizador
+                      </Text>
+                      <Badge color="indigo" variant="light">
+                        Cobertura {(performanceMetrics.fill_rate * 100).toFixed(1)}%
+                      </Badge>
+                    </Group>
+                    <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="xs">
+                      <div>
+                        <Text size="xs" c="dimmed">Tiempo de ejecución</Text>
+                        <Text size="sm" fw={500}>{performanceMetrics.runtime_seconds.toFixed(3)} s</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Cursos cubiertos</Text>
+                        <Text size="sm" fw={500}>{performanceMetrics.assigned_courses}/{performanceMetrics.requested_courses}</Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Carga asignada</Text>
+                        <Text size="sm" fw={500}>
+                          {formatMinutesLabel(performanceMetrics.assigned_minutes)} / {formatMinutesLabel(performanceMetrics.requested_minutes)}
+                        </Text>
+                      </div>
+                      <div>
+                        <Text size="xs" c="dimmed">Cobertura de horas</Text>
+                        <Text size="sm" fw={500}>{(performanceMetrics.fill_rate * 100).toFixed(1)}%</Text>
+                      </div>
+                    </SimpleGrid>
+                  </>
+                )}
+
+                {diagnostics?.messages && diagnostics.messages.length > 0 && (
+                  <Alert color="indigo" variant="light" p="xs">
+                    <Stack gap={4}>
+                      {diagnostics.messages.map((message, index) => (
+                        <Text key={`optimizer-msg-${index}`} size="xs">
+                          {message}
+                        </Text>
+                      ))}
+                    </Stack>
                   </Alert>
                 )}
-                {(qualityMetrics.unassigned_count ?? 0) > 0 && (
+
+                {resolvedUnassignedCauses.length > 0 && (
                   <Alert color="orange" variant="light" p="xs">
-                    <Text size="xs">
-                      ⚠️ {qualityMetrics.unassigned_count} curso(s) no pudieron asignarse completamente
-                    </Text>
+                    <Stack gap={4}>
+                      {resolvedUnassignedCauses.map((item) => (
+                        <div key={`unassigned-cause-${item.courseId}`}>
+                          <Text size="sm" fw={600}>{item.label}</Text>
+                          <Text size="xs" c="dimmed">{item.reason}</Text>
+                        </div>
+                      ))}
+                    </Stack>
                   </Alert>
                 )}
               </Stack>

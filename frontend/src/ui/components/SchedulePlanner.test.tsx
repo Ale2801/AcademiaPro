@@ -137,6 +137,7 @@ function setupApiMocks() {
           program_id: baseProgram.id,
           program_semester_id: baseSemester.id,
           program_semester_label: baseProgramLabel,
+          teacher_id: baseTeacher.id,
         }
         programScheduleRef.current = [...programScheduleRef.current.filter((item) => item.id !== entry.id), entry]
         globalScheduleRef.current = [...globalScheduleRef.current.filter((item) => item.id !== entry.id), entry]
@@ -171,6 +172,7 @@ function setupApiMocks() {
           program_id: baseProgram.id,
           program_semester_id: baseSemester.id,
           program_semester_label: baseProgramLabel,
+          teacher_id: baseTeacher.id,
         }))
         programScheduleRef.current = entries
         globalScheduleRef.current = entries
@@ -249,6 +251,7 @@ describe('SchedulePlanner drag & drop experience', () => {
       program_id: baseProgram.id,
       program_semester_id: baseSemester.id,
       program_semester_label: baseProgramLabel,
+      teacher_id: baseTeacher.id,
     }
     programScheduleRef.current = [occupiedEntry]
     globalScheduleRef.current = [occupiedEntry]
@@ -309,6 +312,7 @@ describe('SchedulePlanner drag & drop experience', () => {
       program_id: baseProgram.id + 1,
       program_semester_id: baseSemester.id + 1,
       program_semester_label: foreignProgramLabel,
+      teacher_id: baseTeacher.id,
     }
     programScheduleRef.current = []
     globalScheduleRef.current = [foreignEntry]
@@ -420,6 +424,79 @@ describe('SchedulePlanner drag & drop experience', () => {
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
   })
 
+  it('adjunta conflictos docentes del horario global al optimizar', async () => {
+    const foreignEntry = {
+      id: 999,
+      course_id: baseCourse.id + 99,
+      course_name: foreignCourseLabel,
+      room_id: baseRoom.id,
+      timeslot_id: baseTimeslot.id,
+      room_code: baseRoom.code,
+      day_of_week: baseTimeslot.day_of_week,
+      start_time: '09:00',
+      end_time: '10:00',
+      duration_minutes: 60,
+      start_offset_minutes: 0,
+      program_id: baseProgram.id + 1,
+      program_semester_id: baseSemester.id + 1,
+      program_semester_label: foreignProgramLabel,
+      teacher_id: baseTeacher.id,
+    }
+    globalScheduleRef.current = [foreignEntry]
+
+    renderPlanner()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ejecutar optimizador' })).toBeEnabled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    await waitFor(() => {
+      const optimizeCall = postMock.mock.calls.find(([path]) => path === '/schedule/optimize')
+      expect(optimizeCall).toBeTruthy()
+      const [, payload] = optimizeCall!
+      expect(payload.constraints.teacher_conflicts).toEqual({
+        [baseTeacher.id]: [baseTimeslot.id],
+      })
+    })
+  })
+
+  it('deriva conflictos docentes del semestre activo cuando no hay horario global', async () => {
+    const localEntry = {
+      id: 1001,
+      course_id: baseCourse.id + 50,
+      course_name: foreignCourseLabel,
+      room_id: baseRoom.id,
+      timeslot_id: baseTimeslot.id,
+      room_code: baseRoom.code,
+      day_of_week: baseTimeslot.day_of_week,
+      start_time: '09:00',
+      end_time: '10:00',
+      duration_minutes: 60,
+      start_offset_minutes: 0,
+      program_id: baseProgram.id,
+      program_semester_id: baseSemester.id,
+      program_semester_label: baseProgramLabel,
+      teacher_id: baseTeacher.id,
+    }
+    programScheduleRef.current = [localEntry]
+    globalScheduleRef.current = []
+
+    renderPlanner()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ejecutar optimizador' })).toBeEnabled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    await waitFor(() => {
+      const optimizeCall = postMock.mock.calls.find(([path]) => path === '/schedule/optimize')
+      expect(optimizeCall).toBeTruthy()
+      const [, payload] = optimizeCall!
+      expect(payload.constraints.teacher_conflicts).toEqual({
+        [baseTeacher.id]: [baseTimeslot.id],
+      })
+    })
+  })
+
   it('muestra un resumen cuando el optimizador detecta conflictos docentes sin bloques sugeridos', async () => {
     renderPlanner()
 
@@ -511,5 +588,61 @@ describe('SchedulePlanner drag & drop experience', () => {
     // Verificar que muestra valores (aunque sean fallbacks)
     // El componente no debe crashear con métricas incompletas
     expect(screen.getByText(/Asignados/i)).toBeInTheDocument()
+  })
+
+  it('muestra métricas de rendimiento y diagnósticos del optimizador', async () => {
+    renderPlanner()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ejecutar optimizador' })).toBeEnabled())
+
+    postMock.mockImplementationOnce((path: string) => {
+      expect(path).toBe('/schedule/optimize')
+      return Promise.resolve({
+        data: {
+          assignments: [
+            {
+              course_id: baseCourse.id,
+              room_id: baseRoom.id,
+              timeslot_id: baseTimeslot.id,
+              duration_minutes: 60,
+              start_offset_minutes: 0,
+            },
+          ],
+          unassigned: [{ course_id: baseCourse.id, remaining_minutes: 30 }],
+          quality_metrics: {
+            total_assigned: 1,
+            balance_score: 80,
+            avg_daily_load: 2,
+            max_daily_load: 3,
+            timeslot_utilization: 0.5,
+            daily_overload_count: 0,
+            unassigned_count: 1,
+          },
+          performance_metrics: {
+            runtime_seconds: 0.456,
+            requested_courses: 1,
+            assigned_courses: 1,
+            requested_minutes: 60,
+            assigned_minutes: 30,
+            fill_rate: 0.5,
+          },
+          diagnostics: {
+            messages: ['Ejecución completada en 0.456 s.', 'Se asignaron 1 de 1 cursos solicitados.'],
+            unassigned_causes: {
+              [String(baseCourse.id)]: 'Sin bloques compatibles tras aplicar disponibilidad docente y jornadas.',
+            },
+          },
+        },
+      })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    await waitFor(() => expect(screen.getByText(/Desempeño del optimizador/i)).toBeInTheDocument())
+    expect(screen.getByText(/Cobertura 50.0%/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/0.456 s/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Ejecución completada en 0.456 s\./i)).toBeInTheDocument()
+    expect(screen.getByText(/Álgebra · 2025-1 · Grupo A/i)).toBeInTheDocument()
+    expect(screen.getByText(/Sin bloques compatibles/i)).toBeInTheDocument()
   })
 })
