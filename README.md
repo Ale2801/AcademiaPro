@@ -166,6 +166,20 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
   - Fallback greedy (`_solve_partial_greedy`) si OR-Tools no está instalado.
   - Resultados devuelven métricas de calidad (balanceo, utilización, violaciones), incluyendo `teacher_overlap_violations` para visibilizar solapes evitados.
 
+Estrategias actuales (se comparan y se selecciona la mejor):
+- **Greedy parcial**: recorre bloques asignando por prioridad con bloqueo de solapes por docente.
+- **GRASP** (`optimizer_grasp.py`): construcción aleatoria guiada + mejora local para diversificar soluciones.
+- **Relajado + CP** (`optimizer_relaxed_cp.py`): usa OR-Tools CP-SAT sobre una versión compacta del problema para refinar horarios.
+- **Genético** (`optimizer_genetic.py`): combina propuestas y aplica mutaciones ligeras para explorar combinaciones de asignaciones.
+
+Cuando `SCHEDULER_FAST_TEST`/`FAST_TEST` está activo, solo se ejecuta el greedy y se reutiliza su resultado para las demás etiquetas, reduciendo tiempos de prueba.
+
+### Cómo funciona cada algoritmo
+- **Greedy parcial**: ordena timeslots (balanceado si hay jornadas/almuerzo) y asigna en rondas; respeta disponibilidad, límites de bloques consecutivos, gaps mínimos, bloqueo de solapes docente a nivel de unidades de 15 minutos y límite diario por programa. Bloquea sala por curso para no fragmentar.
+- **GRASP**: genera una lista de candidatos restringida con aleatoriedad controlada para romper empates del greedy, construye una solución factible y aplica mejora local (intercambios de bloques y reasignación puntual) buscando mejor cobertura y balance.
+- **Relajado + CP (CP-SAT)**: crea un modelo reducido (variables binarias curso-bloque) con restricciones duras de disponibilidad, conflictos de docente y límites diarios; usa OR-Tools CP-SAT para optimizar cobertura y penalizaciones suaves (gaps, balance), luego mapea el resultado a unidades de 15 minutos y valida constraints antes de devolverlo.
+- **Genético**: parte de poblaciones iniciales derivadas del greedy/GRASP, cruza asignaciones por curso/sala y aplica mutaciones ligeras (mover bloques, cambiar sala manteniendo capacidad) manteniendo factibilidad; selecciona por fitness basado en minutos asignados, violaciones y balance.
+
 ## Pruebas automatizadas
 - **Backend** (pytest):
   ```bash
