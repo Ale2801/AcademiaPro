@@ -5,23 +5,18 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
-  Center,
-  Checkbox,
-  CloseButton,
-  Divider,
-  Group,
-  Loader,
-  Modal,
-  MultiSelect,
-  NumberInput,
-  Popover,
-  ScrollArea,
-  SegmentedControl,
-  Select,
-  SelectProps,
-  SimpleGrid,
-  Spoiler,
+  ], [
+    selectedSemester,
+    courses,
+    rooms,
+    timeslots,
+    buildTimeslotBlocks,
+    maxDailyHours,
+    courseLookup,
+    globalSchedule,
+    schedule,
+    normalizeProposals,
+  ])
   Stack,
   Table,
   Tabs,
@@ -174,12 +169,34 @@ type OptimizerDiagnostics = {
   unassigned_causes?: Record<string, string>
 }
 
+type OptimizerProposalSummary = {
+  assigned_courses: number
+  requested_courses: number
+  fill_rate: number
+  pending_courses: number
+  pending_minutes: number
+}
+
+type OptimizerProposal = {
+  algorithm: string
+  is_recommended?: boolean
+  rank?: number
+  assignments: OptimizerAssignment[]
+  unassigned?: OptimizerUnassigned[]
+  quality_metrics?: QualityMetrics | null
+  performance_metrics?: PerformanceMetrics | null
+  diagnostics?: OptimizerDiagnostics | null
+  summary?: OptimizerProposalSummary
+}
+
 type OptimizerResponse = {
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
   quality_metrics?: QualityMetrics
   performance_metrics?: PerformanceMetrics
   diagnostics?: OptimizerDiagnostics
+  recommended_algorithm?: string
+  proposals?: OptimizerProposal[]
 }
 
 type PlannerDialog =
@@ -262,6 +279,8 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
   const [courseStudentMap, setCourseStudentMap] = useState<Record<number, number[]>>({})
   const [optimizerAssignments, setOptimizerAssignments] = useState<Assignment[]>([])
   const [optimizerPreview, setOptimizerPreview] = useState<ScheduleEntry[]>([])
+  const [optimizerProposals, setOptimizerProposals] = useState<OptimizerProposal[]>([])
+  const [selectedProposalKey, setSelectedProposalKey] = useState<string | null>(null)
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
   const [globalSchedule, setGlobalSchedule] = useState<ScheduleEntry[]>([])
 
@@ -438,6 +457,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       setCourseStudentMap(map)
       setOptimizerAssignments([])
       setOptimizerPreview([])
+      setOptimizerProposals([])
+      setSelectedProposalKey(null)
+      setQualityMetrics(null)
+      setPerformanceMetrics(null)
+      setDiagnostics(null)
       if (selectedCourseForStudents && !relevantCourseIds.has(Number(selectedCourseForStudents))) {
         setSelectedCourseForStudents(null)
       }
@@ -1087,6 +1111,24 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     })
   }, [diagnostics, courseLookup])
 
+  const proposalOptions = useMemo(() => {
+    if (optimizerProposals.length === 0) return []
+    return optimizerProposals.map((proposal) => {
+      const summary = proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned)
+      const fillRatePct = (summary.fill_rate ?? 0) * 100
+      const pendingCourses = summary.pending_courses ?? 0
+      const descriptionParts = [`Cobertura ${fillRatePct.toFixed(1)}%`]
+      if (pendingCourses > 0) {
+        descriptionParts.push(`${pendingCourses} pendiente${pendingCourses === 1 ? '' : 's'}`)
+      }
+      return {
+        value: proposal.algorithm,
+        label: `${proposal.algorithm} · ${summary.assigned_courses}/${summary.requested_courses} cursos`,
+        description: descriptionParts.join(' · '),
+      }
+    })
+  }, [optimizerProposals, buildSummary])
+
   const dialogCourseLabel = useMemo(() => {
     if (!dialog) return ''
     if (dialog.type === 'create') {
@@ -1094,6 +1136,124 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     }
     return courseLookup.get(dialog.assignment.course_id)?.label ?? `Curso #${dialog.assignment.course_id}`
   }, [dialog, courseLookup])
+
+  const buildPreviewEntries = useCallback(
+    (assignments: OptimizerAssignment[]): ScheduleEntry[] => {
+      return assignments.map((assignment) => {
+        const course = courseMap.get(assignment.course_id)
+        const timeslot = timeslotMap.get(assignment.timeslot_id)
+        const room = roomMap.get(assignment.room_id)
+        const subjectName = course ? subjectMap.get(course.subject_id) : undefined
+        const teacherName = course?.teacher_id ? userMap.get(teacherMap.get(course.teacher_id)?.user_id ?? 0) : null
+        const slotStartMinutes = timeslot ? timeStringToMinutes(timeslot.start_time) : null
+        const startOffset = assignment.start_offset_minutes ?? 0
+        const durationMinutes =
+          assignment.duration_minutes ??
+          (timeslot ? Math.round(durationInHours(timeslot.start_time, timeslot.end_time) * 60) : 0)
+        const startMinutesAbsolute = slotStartMinutes != null ? slotStartMinutes + startOffset : null
+        const endMinutesAbsolute =
+          startMinutesAbsolute != null ? startMinutesAbsolute + durationMinutes : timeStringToMinutes(timeslot?.end_time)
+        const startLabel = minutesToTimeString(startMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.start_time) : undefined)
+        const endLabel = minutesToTimeString(endMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.end_time) : undefined)
+
+        return {
+          course_id: assignment.course_id,
+          course_name: subjectName
+            ? `${subjectName}${course?.group ? ` · Grupo ${course.group}` : ''}`
+            : `Curso #${assignment.course_id}`,
+          subject_name: subjectName,
+          room_id: assignment.room_id,
+          room_code: room?.code,
+          timeslot_id: assignment.timeslot_id,
+          day_of_week: timeslot?.day_of_week,
+          start_time: startLabel ?? undefined,
+          end_time: endLabel ?? undefined,
+          teacher_name: teacherName ?? undefined,
+          duration_minutes: durationMinutes,
+          start_offset_minutes: assignment.start_offset_minutes ?? 0,
+        }
+      })
+    },
+    [courseMap, roomMap, subjectMap, teacherMap, timeslotMap, userMap],
+  )
+
+  const buildSummary = useCallback(
+    (performance?: PerformanceMetrics | null, unassigned?: OptimizerUnassigned[]): OptimizerProposalSummary => {
+      const pendingList = unassigned ?? []
+      return {
+        assigned_courses: performance?.assigned_courses ?? 0,
+        requested_courses: performance?.requested_courses ?? courses.length,
+        fill_rate: performance?.fill_rate ?? 0,
+        pending_courses: pendingList.length,
+        pending_minutes: pendingList.reduce((acc, item) => acc + item.remaining_minutes, 0),
+      }
+    },
+    [courses.length],
+  )
+
+  const normalizeProposals = useCallback(
+    (response: OptimizerResponse): OptimizerProposal[] => {
+      if (response.proposals && response.proposals.length > 0) {
+        return response.proposals.map((proposal) => ({
+          ...proposal,
+          quality_metrics: proposal.quality_metrics ?? null,
+          performance_metrics: proposal.performance_metrics ?? null,
+          diagnostics: proposal.diagnostics ?? null,
+          summary: proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned),
+        }))
+      }
+
+      const fallbackAssignments = response.assignments ?? []
+      const fallbackUnassigned = response.unassigned ?? []
+      return [
+        {
+          algorithm: response.recommended_algorithm ?? 'Greedy',
+          is_recommended: true,
+          rank: 0,
+          assignments: fallbackAssignments,
+          unassigned: fallbackUnassigned,
+          quality_metrics: response.quality_metrics ?? null,
+          performance_metrics: response.performance_metrics ?? null,
+          diagnostics: response.diagnostics ?? null,
+          summary: buildSummary(response.performance_metrics, fallbackUnassigned),
+        },
+      ]
+    },
+    [buildSummary],
+  )
+
+  const applyProposalSnapshot = useCallback(
+    (proposal: OptimizerProposal | null) => {
+      if (!proposal) {
+        setOptimizerAssignments([])
+        setOptimizerPreview([])
+        setQualityMetrics(null)
+        setPerformanceMetrics(null)
+        setDiagnostics(null)
+        return
+      }
+      const assignments = proposal.assignments ?? []
+      setOptimizerAssignments(assignments)
+      setOptimizerPreview(buildPreviewEntries(assignments))
+      setQualityMetrics(proposal.quality_metrics ?? null)
+      setPerformanceMetrics(proposal.performance_metrics ?? null)
+      setDiagnostics(proposal.diagnostics ?? null)
+    },
+    [buildPreviewEntries],
+  )
+
+  const resolvedProposal = useMemo(() => {
+    if (optimizerProposals.length === 0) return null
+    if (selectedProposalKey) {
+      const match = optimizerProposals.find((proposal) => proposal.algorithm === selectedProposalKey)
+      if (match) return match
+    }
+    return optimizerProposals[0]
+  }, [optimizerProposals, selectedProposalKey])
+
+  useEffect(() => {
+    applyProposalSnapshot(resolvedProposal)
+  }, [applyProposalSnapshot, resolvedProposal])
 
   const runOptimizer = useCallback(async () => {
     if (!selectedSemester) {
@@ -1159,64 +1319,34 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       }
 
       const { data } = await api.post<OptimizerResponse>('/schedule/optimize', payload)
-      const parsedAssignments: Assignment[] = data.assignments.map((assignment) => ({
-        course_id: assignment.course_id,
-        room_id: assignment.room_id,
-        timeslot_id: assignment.timeslot_id,
-        duration_minutes: assignment.duration_minutes,
-        start_offset_minutes: assignment.start_offset_minutes,
-      }))
-      const preview: ScheduleEntry[] = parsedAssignments.map((assignment) => {
-        const course = courseMap.get(assignment.course_id)
-        const timeslot = timeslotMap.get(assignment.timeslot_id)
-        const room = roomMap.get(assignment.room_id)
-        const subjectName = course ? subjectMap.get(course.subject_id) : undefined
-        const teacherName = course?.teacher_id ? userMap.get(teacherMap.get(course.teacher_id)?.user_id ?? 0) : null
-        const slotStartMinutes = timeslot ? timeStringToMinutes(timeslot.start_time) : null
-        const startOffset = assignment.start_offset_minutes ?? 0
-        const durationMinutes = assignment.duration_minutes ?? (timeslot ? Math.round(durationInHours(timeslot.start_time, timeslot.end_time) * 60) : 0)
-        const startMinutesAbsolute = slotStartMinutes != null ? slotStartMinutes + startOffset : null
-        const endMinutesAbsolute = startMinutesAbsolute != null ? startMinutesAbsolute + durationMinutes : timeStringToMinutes(timeslot?.end_time)
-        const startLabel = minutesToTimeString(startMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.start_time) : undefined)
-        const endLabel = minutesToTimeString(endMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.end_time) : undefined)
-        return {
-          course_id: assignment.course_id,
-          course_name: subjectName
-            ? `${subjectName}${course?.group ? ` · Grupo ${course.group}` : ''}`
-            : `Curso #${assignment.course_id}`,
-          subject_name: subjectName,
-          room_id: assignment.room_id,
-          room_code: room?.code,
-          timeslot_id: assignment.timeslot_id,
-          day_of_week: timeslot?.day_of_week,
-          start_time: startLabel ?? undefined,
-          end_time: endLabel ?? undefined,
-          teacher_name: teacherName ?? undefined,
-          duration_minutes: durationMinutes,
-          start_offset_minutes: assignment.start_offset_minutes ?? 0,
-        }
-      })
-      setOptimizerAssignments(parsedAssignments)
-      setOptimizerPreview(preview)
-      
-      // Guardar métricas de calidad y rendimiento si están disponibles
-      if (data.quality_metrics) {
-        setQualityMetrics(data.quality_metrics)
+      const proposals = normalizeProposals(data)
+      if (proposals.length === 0) {
+        setOptimizerProposals([])
+        setSelectedProposalKey(null)
+        setSuccess('El optimizador no generó propuestas válidas.')
+        return
       }
-      setPerformanceMetrics(data.performance_metrics ?? null)
-      setDiagnostics(data.diagnostics ?? null)
-      
-      const unassigned = data.unassigned ?? []
-      if (unassigned.length > 0) {
-        const detail = unassigned
+
+      setOptimizerProposals(proposals)
+      const preferredKey = data.recommended_algorithm && proposals.some((proposal) => proposal.algorithm === data.recommended_algorithm)
+        ? data.recommended_algorithm
+        : proposals[0].algorithm
+      setSelectedProposalKey(preferredKey)
+
+      const recommendedProposal = proposals.find((proposal) => proposal.algorithm === preferredKey) ?? proposals[0]
+      const assignmentCount = recommendedProposal.assignments?.length ?? 0
+      const pendingList = recommendedProposal.unassigned ?? []
+      if (pendingList.length > 0) {
+        const detail = pendingList
           .map((item) => {
             const courseLabel = courseLookup.get(item.course_id)?.label ?? `Curso #${item.course_id}`
             return `${courseLabel}: ${formatMinutesLabel(item.remaining_minutes)}`
           })
           .join(', ')
-        setSuccess(`Optimización parcial: ${parsedAssignments.length} bloques sugeridos. Pendiente: ${detail}.`)
+        setSuccess(`Propuesta ${recommendedProposal.algorithm}: ${assignmentCount} bloques sugeridos. Pendiente: ${detail}.`)
       } else {
-        setSuccess(`Optimización generó ${parsedAssignments.length} bloques sugeridos.`)
+        const assignmentLabel = assignmentCount === 1 ? 'bloque sugerido' : 'bloques sugeridos'
+        setSuccess(`Propuesta ${recommendedProposal.algorithm}: ${assignmentCount} ${assignmentLabel} listos para revisión.`)
       }
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo optimizar el horario'
@@ -1230,15 +1360,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     rooms,
     buildTimeslotBlocks,
     maxDailyHours,
-    courseMap,
     courseLookup,
     timeslotMap,
-    roomMap,
-    subjectMap,
-    userMap,
-    teacherMap,
     globalSchedule,
     schedule,
+    normalizeProposals,
   ])
 
   const handleApplyOptimized = useCallback(async () => {
@@ -1255,6 +1381,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       await loadSemesterData(Number(selectedSemester))
       setOptimizerAssignments([])
       setOptimizerPreview([])
+      setOptimizerProposals([])
+      setSelectedProposalKey(null)
+      setQualityMetrics(null)
+      setPerformanceMetrics(null)
+      setDiagnostics(null)
       setSuccess('Horario aplicado correctamente')
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo guardar el horario sugerido'
@@ -1872,6 +2003,17 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
             onChange={(value) => setMaxDailyHours(Number(value) || 6)}
             maw={220}
           />
+
+          {optimizerProposals.length > 0 && (
+            <Select
+              label="Comparar algoritmos"
+              description="Elige la propuesta a revisar"
+              data={proposalOptions}
+              value={selectedProposalKey}
+              onChange={setSelectedProposalKey}
+              maw={360}
+            />
+          )}
 
           <Group gap="sm">
             <Button leftSection={<IconRun size={18} />} loading={optimizerLoading} onClick={() => runOptimizer()}>

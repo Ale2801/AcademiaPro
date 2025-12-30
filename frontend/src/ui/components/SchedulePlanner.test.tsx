@@ -144,18 +144,84 @@ function setupApiMocks() {
         return Promise.resolve({ data: entry })
       }
       case '/schedule/optimize':
+        const assignments = [
+          {
+            course_id: baseCourse.id,
+            room_id: baseRoom.id,
+            timeslot_id: baseTimeslot.id,
+            duration_minutes: 45,
+            start_offset_minutes: 15,
+          },
+        ]
+        const unassigned = [{ course_id: baseCourse.id, remaining_minutes: 30 }]
+        const qualityMetrics = {
+          total_assigned: 1,
+          total_unassigned: 0,
+          lunch_violations: 0,
+          consecutive_blocks_violations: 0,
+          gap_violations: 0,
+          balance_score: 82.5,
+          daily_overload_count: 0,
+          avg_daily_load: 4,
+          max_daily_load: 5,
+          timeslot_utilization: 0.4,
+          unassigned_count: 1,
+        }
+        const performanceMetrics = {
+          runtime_seconds: 0.015,
+          requested_courses: 1,
+          assigned_courses: 1,
+          requested_minutes: 120,
+          assigned_minutes: 90,
+          fill_rate: 0.75,
+        }
+        const diagnostics = { messages: ['Diagnóstico base'], unassigned_causes: { [baseCourse.id]: 'Sin bloques' } }
+        const graspQuality = { ...qualityMetrics, balance_score: 91.3 }
+        const graspPerformance = { ...performanceMetrics, fill_rate: 0.95 }
         return Promise.resolve({
           data: {
-            assignments: [
+            assignments,
+            unassigned,
+            quality_metrics: qualityMetrics,
+            performance_metrics: performanceMetrics,
+            diagnostics,
+            recommended_algorithm: 'Greedy',
+            proposals: [
               {
-                course_id: baseCourse.id,
-                room_id: baseRoom.id,
-                timeslot_id: baseTimeslot.id,
-                duration_minutes: 45,
-                start_offset_minutes: 15,
+                algorithm: 'Greedy',
+                is_recommended: true,
+                rank: 0,
+                assignments,
+                unassigned,
+                quality_metrics: qualityMetrics,
+                performance_metrics: performanceMetrics,
+                diagnostics,
+                summary: {
+                  assigned_courses: performanceMetrics.assigned_courses,
+                  requested_courses: performanceMetrics.requested_courses,
+                  fill_rate: performanceMetrics.fill_rate,
+                  pending_courses: unassigned.length,
+                  pending_minutes: unassigned.reduce((acc, item) => acc + item.remaining_minutes, 0),
+                },
+              },
+              {
+                algorithm: 'GRASP',
+                is_recommended: false,
+                rank: 1,
+                assignments,
+                unassigned: [],
+                quality_metrics: graspQuality,
+                performance_metrics: graspPerformance,
+                diagnostics: { messages: ['Alternativa'], unassigned_causes: {} },
+                summary: {
+                  assigned_courses: graspPerformance.assigned_courses,
+                  requested_courses: graspPerformance.requested_courses,
+                  fill_rate: graspPerformance.fill_rate,
+                  pending_courses: 0,
+                  pending_minutes: 0,
+                },
               },
             ],
-            unassigned: [{ course_id: baseCourse.id, remaining_minutes: 30 }],
           },
         })
       case '/schedule/assignments/save': {
@@ -396,7 +462,7 @@ describe('SchedulePlanner drag & drop experience', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Optimización parcial: 1 bloques sugeridos\. Pendiente: .*30m\./i),
+        screen.getByText(/Propuesta Greedy: 1 bloques sugeridos\. Pendiente: .*30m\./i),
       ).toBeInTheDocument(),
     )
 
@@ -422,6 +488,23 @@ describe('SchedulePlanner drag & drop experience', () => {
     await waitFor(() => expect(screen.getByText('Horario aplicado correctamente')).toBeInTheDocument())
 
     await waitFor(() => expect(getMock).toHaveBeenCalledWith('/schedule/overview', expect.anything()))
+  })
+
+  it('permite alternar entre algoritmos y actualiza las métricas mostradas', async () => {
+    renderPlanner()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ejecutar optimizador' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar optimizador' }))
+
+    const selectControl = await screen.findByLabelText('Comparar algoritmos')
+    expect(selectControl).toBeInTheDocument()
+    expect(screen.getByText(/Score: 82\/100/i)).toBeInTheDocument()
+
+    fireEvent.click(selectControl)
+    const graspOption = await screen.findByText('GRASP · 1/1 cursos')
+    fireEvent.click(graspOption)
+
+    await waitFor(() => expect(screen.getByText(/Score: 91\/100/i)).toBeInTheDocument())
   })
 
   it('adjunta conflictos docentes del horario global al optimizar', async () => {

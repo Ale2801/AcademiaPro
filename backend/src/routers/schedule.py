@@ -20,7 +20,13 @@ from ..models import (
     User,
 )
 from ..models import Program, ProgramSemester
-from ..scheduler.optimizer import Constraints, CourseInput, RoomInput, TimeslotInput, solve_schedule
+from ..scheduler.optimizer import (
+    Constraints,
+    CourseInput,
+    RoomInput,
+    TimeslotInput,
+    solve_schedule_with_comparison,
+)
 from ..security import get_current_user, require_roles
 
 
@@ -361,47 +367,33 @@ def optimize(
         if slots
     }
 
-    result = solve_schedule(
+    comparison = solve_schedule_with_comparison(
         [CourseInput(**c.model_dump()) for c in courses],
         [RoomInput(**r.model_dump()) for r in rooms],
         timeslot_inputs,
         Constraints(**constraints_data),
     )
 
-    assignments_payload = [
-        {
-            "course_id": item.course_id,
-            "room_id": item.room_id,
-            "timeslot_id": item.timeslot_id,
-            "duration_minutes": item.duration_minutes,
-            "start_offset_minutes": item.start_offset_minutes,
-        }
-        for item in result.assignments
-    ]
+    best_result = comparison.best_result()
 
-    unassigned_payload = [
-        {"course_id": course_id, "remaining_minutes": minutes}
-        for course_id, minutes in result.unassigned.items()
-    ]
+    def _build_result_payload(result):
+        assignments_payload = [
+            {
+                "course_id": item.course_id,
+                "room_id": item.room_id,
+                "timeslot_id": item.timeslot_id,
+                "duration_minutes": item.duration_minutes,
+                "start_offset_minutes": item.start_offset_minutes,
+            }
+            for item in result.assignments
+        ]
 
-    performance_payload = {
-        "runtime_seconds": result.performance_metrics.runtime_seconds,
-        "requested_courses": result.performance_metrics.requested_courses,
-        "assigned_courses": result.performance_metrics.assigned_courses,
-        "requested_minutes": result.performance_metrics.requested_minutes,
-        "assigned_minutes": result.performance_metrics.assigned_minutes,
-        "fill_rate": result.performance_metrics.fill_rate,
-    }
+        unassigned_payload = [
+            {"course_id": course_id, "remaining_minutes": minutes}
+            for course_id, minutes in result.unassigned.items()
+        ]
 
-    diagnostics_payload = {
-        "messages": list(result.diagnostics.messages),
-        "unassigned_causes": result.diagnostics.unassigned_causes,
-    }
-
-    return {
-        "assignments": assignments_payload,
-        "unassigned": unassigned_payload,
-        "quality_metrics": {
+        quality_payload = {
             "total_assigned": result.quality_metrics.total_assigned,
             "total_unassigned": result.quality_metrics.total_unassigned,
             "lunch_violations": result.quality_metrics.lunch_violations,
@@ -413,9 +405,81 @@ def optimize(
             "max_daily_load": result.quality_metrics.max_daily_load,
             "timeslot_utilization": result.quality_metrics.timeslot_utilization,
             "unassigned_count": result.quality_metrics.unassigned_count,
-        },
+        }
+
+        performance_payload = {
+            "runtime_seconds": result.performance_metrics.runtime_seconds,
+            "requested_courses": result.performance_metrics.requested_courses,
+            "assigned_courses": result.performance_metrics.assigned_courses,
+            "requested_minutes": result.performance_metrics.requested_minutes,
+            "assigned_minutes": result.performance_metrics.assigned_minutes,
+            "fill_rate": result.performance_metrics.fill_rate,
+        }
+
+        diagnostics_payload = {
+            "messages": list(result.diagnostics.messages),
+            "unassigned_causes": result.diagnostics.unassigned_causes,
+        }
+
+        summary_payload = {
+            "assigned_courses": performance_payload["assigned_courses"],
+            "requested_courses": performance_payload["requested_courses"],
+            "fill_rate": performance_payload["fill_rate"],
+            "pending_courses": len(unassigned_payload),
+            "pending_minutes": sum(item["remaining_minutes"] for item in unassigned_payload),
+        }
+
+        return (
+            assignments_payload,
+            unassigned_payload,
+            quality_payload,
+            performance_payload,
+            diagnostics_payload,
+            summary_payload,
+        )
+
+    (
+        assignments_payload,
+        unassigned_payload,
+        quality_payload,
+        performance_payload,
+        diagnostics_payload,
+        summary_payload,
+    ) = _build_result_payload(best_result)
+
+    proposals_payload = []
+    for proposal in comparison.proposals:
+        (
+            proposal_assignments,
+            proposal_unassigned,
+            proposal_quality,
+            proposal_performance,
+            proposal_diagnostics,
+            proposal_summary,
+        ) = _build_result_payload(proposal.result)
+        proposals_payload.append(
+            {
+                "algorithm": proposal.algorithm,
+                "is_recommended": proposal.is_recommended,
+                "rank": proposal.rank,
+                "assignments": proposal_assignments,
+                "unassigned": proposal_unassigned,
+                "quality_metrics": proposal_quality,
+                "performance_metrics": proposal_performance,
+                "diagnostics": proposal_diagnostics,
+                "summary": proposal_summary,
+            }
+        )
+
+    return {
+        "assignments": assignments_payload,
+        "unassigned": unassigned_payload,
+        "quality_metrics": quality_payload,
         "performance_metrics": performance_payload,
         "diagnostics": diagnostics_payload,
+        "summary": summary_payload,
+        "recommended_algorithm": comparison.recommended_algorithm,
+        "proposals": proposals_payload,
     }
 
 

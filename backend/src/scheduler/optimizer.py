@@ -108,12 +108,50 @@ class SolveResult:
     diagnostics: OptimizationDiagnostics = field(default_factory=OptimizationDiagnostics)
 
 
+@dataclass
+class ScheduleProposal:
+    algorithm: str
+    result: SolveResult
+    is_recommended: bool = False
+    rank: int = 0
+
+
+@dataclass
+class SolveComparisonResult:
+    proposals: List[ScheduleProposal]
+    recommended_algorithm: str
+
+    def best_result(self) -> SolveResult:
+        for proposal in self.proposals:
+            if proposal.algorithm == self.recommended_algorithm:
+                return proposal.result
+        return self.proposals[0].result if self.proposals else SolveResult([], {})
+
+
+def _score_result(result: SolveResult) -> Tuple[int, int, float]:
+    return (
+        result.performance_metrics.assigned_courses,
+        -len(result.unassigned),
+        result.performance_metrics.fill_rate,
+    )
+
+
 def solve_schedule(
     courses: List[CourseInput],
     rooms: List[RoomInput],
     timeslots: List[TimeslotInput],
     cons: Constraints,
 ) -> SolveResult:
+    comparison = solve_schedule_with_comparison(courses, rooms, timeslots, cons)
+    return comparison.best_result()
+
+
+def solve_schedule_with_comparison(
+    courses: List[CourseInput],
+    rooms: List[RoomInput],
+    timeslots: List[TimeslotInput],
+    cons: Constraints,
+) -> SolveComparisonResult:
     attempts: List[SolveResult] = []
 
     base_result = _solve_partial_greedy(courses, rooms, timeslots, cons)
@@ -135,19 +173,77 @@ def solve_schedule(
             reversed_result = _solve_partial_greedy(courses, rooms, reversed_timeslots, cons)
             attempts.append(reversed_result)
 
-    def _score(result: SolveResult) -> Tuple[int, int, float]:
-        return (
-            result.performance_metrics.assigned_courses,
-            -len(result.unassigned),
-            result.performance_metrics.fill_rate,
-        )
-
-    best = max(attempts, key=_score)
+    best = max(attempts, key=_score_result)
     if best is not base_result and best.performance_metrics.assigned_courses > base_result.performance_metrics.assigned_courses:
         best.diagnostics.messages.append(
             "Se aplicaron intentos adicionales (priorización docente/orden alterno) para maximizar la cobertura."
         )
-    return best
+    greedy_best = best
+
+    # Ejecutar enfoque GRASP + refinamiento local para comparar resultados
+    from . import optimizer_genetic, optimizer_grasp, optimizer_relaxed_cp
+
+    grasp_result = optimizer_grasp.solve_schedule_grasp(courses, rooms, timeslots, cons)
+
+    relaxed_cp_result = optimizer_relaxed_cp.solve_schedule_relaxed_cp(
+        courses, rooms, timeslots, cons
+    )
+
+    genetic_result = optimizer_genetic.solve_schedule_genetic(
+        courses, rooms, timeslots, cons
+    )
+
+    contenders: List[Tuple[str, SolveResult]] = [
+        ("Greedy", greedy_best),
+        ("GRASP", grasp_result),
+        ("Relajado+CP", relaxed_cp_result),
+        ("Genético", genetic_result),
+    ]
+
+    for label, result in contenders:
+        for line in _format_detailed_summary(label, result):
+            print(line)
+
+    best_label, best_result = max(contenders, key=lambda item: _score_result(item[1]))
+
+    if best_label != "Greedy":
+        print(f"{best_label} obtuvo mejores métricas que el enfoque greedy.")
+    else:
+        print("El enfoque greedy se mantiene como la mejor solución para este conjunto de datos.")
+
+    proposals = [
+        ScheduleProposal(
+            algorithm=label,
+            result=result,
+            is_recommended=(label == best_label),
+            rank=index,
+        )
+        for index, (label, result) in enumerate(contenders)
+    ]
+
+    return SolveComparisonResult(proposals=proposals, recommended_algorithm=best_label)
+
+
+def _format_detailed_summary(label: str, result: SolveResult) -> List[str]:
+    performance = result.performance_metrics
+    quality = result.quality_metrics
+    pending_courses = len(result.unassigned)
+    pending_minutes = sum(result.unassigned.values()) if result.unassigned else 0
+    requested_hours = performance.requested_minutes / 60.0 if performance.requested_minutes else 0.0
+    assigned_hours = performance.assigned_minutes / 60.0 if performance.assigned_minutes else 0.0
+
+    lines = [
+        f"[{label}] Cursos asignados: {performance.assigned_courses}/{performance.requested_courses} · Pendientes: {pending_courses}",
+        f"[{label}] Horas cubiertas: {assigned_hours:.1f}/{requested_hours:.1f} ({performance.fill_rate:.1%})",
+        f"[{label}] Runtime: {performance.runtime_seconds:.3f}s · Utilización de bloques: {quality.timeslot_utilization:.1%}",
+        f"[{label}] Balance: {quality.balance_score:.1f} · Sobrecargas diarias: {quality.daily_overload_count}",
+        f"[{label}] Carga diaria promedio: {quality.avg_daily_load:.2f}h · Máxima: {quality.max_daily_load:.2f}h",
+    ]
+
+    if pending_minutes > 0:
+        lines.append(f"[{label}] Minutos pendientes totales: {pending_minutes}")
+
+    return lines
 
 
 def _prioritize_courses_by_teacher_load(

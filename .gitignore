@@ -18,3 +18,4 @@ frontend/.vite/
 frontend/coverage/
 backend/.mypy_cache/
 backend/.pytest_cache/
+backend/uploads/
