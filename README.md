@@ -21,12 +21,11 @@ Sistema académico completo para gestionar catálogos, cursos y horarios con un 
 - **Infraestructura**: Docker Compose levanta API y Postgres. En entornos sin Docker puede ejecutarse cada servicio por separado.
 
 ## Características principales
-- Autenticación JWT con roles (`admin`, `teacher`, `student`) y guardas de acceso en routers.
- - Autenticación JWT con roles (`admin`, `coordinator`, `teacher`, `student`) y guardas de acceso en routers.
+- Autenticación JWT con roles (`admin`, `coordinator`, `teacher`, `student`) y guardas de acceso en routers.
 - CRUD completo de programas, asignaturas, cursos, docentes, estudiantes, matrículas, evaluaciones y asistencia.
 - Asignaturas con prerrequisitos configurables para reforzar el flujo de aprobación previo a cursar nuevas materias.
 - Gestión de perfiles personales con endpoints `/users/me` y `/users/me/avatar`, carga/validación de fotos en base64 y bandera `must_change_password` para obligar el primer cambio de contraseña a través de `/auth/change-password`.
-- Optimizador de horarios con granularidad de 15 minutos que respeta disponibilidad docente, restricciones de sala, recesos configurables, máximos de bloques consecutivos y límites diarios por programa.
+- Optimizador de horarios con granularidad de 15 minutos que respeta disponibilidad docente, restricciones de sala, recesos configurables, máximos de bloques consecutivos y límites diarios por programa, bloqueando solapes entre docentes a nivel de unidades de 15 minutos y reportando `teacher_overlap_violations` en las métricas.
 - Exportación de horarios (Excel/PDF) y guardado persistente de asignaciones.
 - Módulo de **Ajustes de Aplicación** (modelo `AppSetting`, endpoints `/settings`, seed con valores de branding y plataforma).
 - Frontend administrativo con vista global del optimizador, botón de aplicación de propuestas y persistencia de estado de la barra lateral.
@@ -56,6 +55,12 @@ docker compose up --build
 - Frontend en `http://localhost:5173` (cuando se ejecute `npm run dev` en otra terminal)
 
 En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario admin `admin@academiapro.dev` / `admin123`, coordinador y catálogos demo). Si estableces `APP_ENV=prod` en un archivo `.env` en la raíz del repositorio, el arranque omite los datos demo y solo crea el administrador por defecto con una contraseña temporal que debe ser cambiada tras el primer inicio de sesión.
+
+### Despliegue en servidor (Docker Compose)
+- Actualiza el código: `git pull origin main` (o la rama que uses).
+- Construye y levanta en segundo plano: `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`.
+- Si trabajas con imágenes preconstruidas, primero ejecuta `docker compose -f docker-compose.prod.yml pull` y luego `up -d`.
+- Verifica estado: `docker compose ps` y logs: `docker compose logs -f backend` / `frontend`.
 
 ## Configuración para desarrollo local
 
@@ -105,6 +110,7 @@ En modo desarrollo (`APP_ENV=dev`) la base se siembra automáticamente (usuario 
 - `FILE_STORAGE_LOCAL_PATH`: ruta absoluta o relativa que se usará cuando el driver sea `local` (default `./uploads`).
 - `FILE_STORAGE_DOCKER_PATH`: ruta dentro del contenedor cuando se monte un volumen (default `/data/uploads`).
 - `FILE_STORAGE_S3_BUCKET`, `FILE_STORAGE_S3_REGION`, `FILE_STORAGE_S3_ENDPOINT`, `FILE_STORAGE_S3_ACCESS_KEY_ID`, `FILE_STORAGE_S3_SECRET_ACCESS_KEY`, `FILE_STORAGE_S3_USE_SSL`: datos necesarios para apuntar a un bucket S3 (o compatible) cuando `FILE_STORAGE_DRIVER=s3`.
+- `SCHEDULER_FAST_TEST` / `FAST_TEST`: cuando está presente, el optimizador usa solo el enfoque greedy (mismo resultado clonado en demás estrategias) para acelerar suites de pruebas y entornos CI.
 
 El backend expone un endpoint `/settings/public` para ajustes visibles en el frontend (branding, idioma, zona horaria, etc.). Los valores iniciales se controlan mediante `src/seed.py`.
 
@@ -157,8 +163,8 @@ El backend expone un endpoint `/settings/public` para ajustes visibles en el fro
   - `min_gap_blocks` y `min_gap_minutes` entre clases.
   - `max_daily_hours_per_program` para evitar sobrecarga.
   - Jornadas y bloques de almuerzo opcionales.
-- Fallback greedy (`_solve_partial_greedy`) si OR-Tools no está instalado.
-- Resultados devuelven métricas de calidad (balanceo, utilización, violaciones).
+  - Fallback greedy (`_solve_partial_greedy`) si OR-Tools no está instalado.
+  - Resultados devuelven métricas de calidad (balanceo, utilización, violaciones), incluyendo `teacher_overlap_violations` para visibilizar solapes evitados.
 
 ## Pruebas automatizadas
 - **Backend** (pytest):
