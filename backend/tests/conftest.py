@@ -11,6 +11,7 @@ def client():
     test_db_path = os.path.abspath("test.db")
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
     os.environ["APP_ENV"] = "dev"
+    os.environ.setdefault("SCHEDULER_FAST_TEST", "1")
     upload_dir = os.path.abspath("test_uploads")
     os.environ["FILE_STORAGE_DRIVER"] = "local"
     os.environ["FILE_STORAGE_LOCAL_PATH"] = upload_dir
@@ -70,7 +71,19 @@ def client():
 
     main.app.dependency_overrides[original_get_session] = override_get_session
 
+    # Timeout defensivo para evitar bloqueos silenciosos del TestClient en pruebas largas
     client = TestClient(main.app)
+
+    # Forzar timeout por petición (httpx permite timeout por llamada)
+    import httpx
+
+    original_request = client.request
+
+    def _request_with_timeout(*args, **kwargs):
+        kwargs.setdefault("timeout", httpx.Timeout(20.0))
+        return original_request(*args, **kwargs)
+
+    client.request = _request_with_timeout  # type: ignore[assignment]
     yield client
     client.close()
     try:

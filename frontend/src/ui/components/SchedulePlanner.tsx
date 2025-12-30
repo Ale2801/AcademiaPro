@@ -5,18 +5,23 @@ import {
   Alert,
   Badge,
   Button,
-  ], [
-    selectedSemester,
-    courses,
-    rooms,
-    timeslots,
-    buildTimeslotBlocks,
-    maxDailyHours,
-    courseLookup,
-    globalSchedule,
-    schedule,
-    normalizeProposals,
-  ])
+  Card,
+  Center,
+  Checkbox,
+  CloseButton,
+  Divider,
+  Group,
+  Loader,
+  Modal,
+  MultiSelect,
+  NumberInput,
+  Popover,
+  ScrollArea,
+  SegmentedControl,
+  Select,
+  SelectProps,
+  SimpleGrid,
+  Spoiler,
   Stack,
   Table,
   Tabs,
@@ -169,24 +174,13 @@ type OptimizerDiagnostics = {
   unassigned_causes?: Record<string, string>
 }
 
-type OptimizerProposalSummary = {
-  assigned_courses: number
-  requested_courses: number
-  fill_rate: number
-  pending_courses: number
-  pending_minutes: number
-}
-
 type OptimizerProposal = {
-  algorithm: string
-  is_recommended?: boolean
-  rank?: number
+  strategy: string
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
-  quality_metrics?: QualityMetrics | null
-  performance_metrics?: PerformanceMetrics | null
-  diagnostics?: OptimizerDiagnostics | null
-  summary?: OptimizerProposalSummary
+  quality_metrics?: QualityMetrics
+  performance_metrics?: PerformanceMetrics
+  diagnostics?: OptimizerDiagnostics
 }
 
 type OptimizerResponse = {
@@ -195,8 +189,8 @@ type OptimizerResponse = {
   quality_metrics?: QualityMetrics
   performance_metrics?: PerformanceMetrics
   diagnostics?: OptimizerDiagnostics
-  recommended_algorithm?: string
   proposals?: OptimizerProposal[]
+  selected_strategy?: string | null
 }
 
 type PlannerDialog =
@@ -279,10 +273,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
   const [courseStudentMap, setCourseStudentMap] = useState<Record<number, number[]>>({})
   const [optimizerAssignments, setOptimizerAssignments] = useState<Assignment[]>([])
   const [optimizerPreview, setOptimizerPreview] = useState<ScheduleEntry[]>([])
-  const [optimizerProposals, setOptimizerProposals] = useState<OptimizerProposal[]>([])
-  const [selectedProposalKey, setSelectedProposalKey] = useState<string | null>(null)
+  const [proposals, setProposals] = useState<OptimizerProposal[]>([])
+  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
   const [globalSchedule, setGlobalSchedule] = useState<ScheduleEntry[]>([])
+  const [unassigned, setUnassigned] = useState<OptimizerUnassigned[]>([])
 
   const [maxDailyHours, setMaxDailyHours] = useState(6)
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
@@ -417,6 +412,10 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       setStudents(studentsRes.data as Student[])
       setSubjects(subjectsRes.data as Subject[])
       setUsers(usersRes.data as User[])
+      setProposals([])
+      setSelectedStrategy(null)
+      setOptimizerAssignments([])
+      setOptimizerPreview([])
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo cargar catálogos base'
       setError(detail)
@@ -457,11 +456,12 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       setCourseStudentMap(map)
       setOptimizerAssignments([])
       setOptimizerPreview([])
-      setOptimizerProposals([])
-      setSelectedProposalKey(null)
+      setProposals([])
+      setSelectedStrategy(null)
       setQualityMetrics(null)
       setPerformanceMetrics(null)
       setDiagnostics(null)
+      setUnassigned([])
       if (selectedCourseForStudents && !relevantCourseIds.has(Number(selectedCourseForStudents))) {
         setSelectedCourseForStudents(null)
       }
@@ -1111,24 +1111,6 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     })
   }, [diagnostics, courseLookup])
 
-  const proposalOptions = useMemo(() => {
-    if (optimizerProposals.length === 0) return []
-    return optimizerProposals.map((proposal) => {
-      const summary = proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned)
-      const fillRatePct = (summary.fill_rate ?? 0) * 100
-      const pendingCourses = summary.pending_courses ?? 0
-      const descriptionParts = [`Cobertura ${fillRatePct.toFixed(1)}%`]
-      if (pendingCourses > 0) {
-        descriptionParts.push(`${pendingCourses} pendiente${pendingCourses === 1 ? '' : 's'}`)
-      }
-      return {
-        value: proposal.algorithm,
-        label: `${proposal.algorithm} · ${summary.assigned_courses}/${summary.requested_courses} cursos`,
-        description: descriptionParts.join(' · '),
-      }
-    })
-  }, [optimizerProposals, buildSummary])
-
   const dialogCourseLabel = useMemo(() => {
     if (!dialog) return ''
     if (dialog.type === 'create') {
@@ -1137,9 +1119,36 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     return courseLookup.get(dialog.assignment.course_id)?.label ?? `Curso #${dialog.assignment.course_id}`
   }, [dialog, courseLookup])
 
-  const buildPreviewEntries = useCallback(
-    (assignments: OptimizerAssignment[]): ScheduleEntry[] => {
-      return assignments.map((assignment) => {
+  const normalizeResponseProposals = useCallback(
+    (data: OptimizerResponse): OptimizerProposal[] => {
+      const base = data.proposals ?? []
+      if (base.length > 0) {
+        return base.map((item) => ({
+          strategy: item.strategy || 'Propuesta',
+          assignments: item.assignments ?? [],
+          unassigned: item.unassigned ?? [],
+          quality_metrics: item.quality_metrics,
+          performance_metrics: item.performance_metrics,
+          diagnostics: item.diagnostics,
+        }))
+      }
+      return [
+        {
+          strategy: data.selected_strategy || 'Mejor propuesta',
+          assignments: data.assignments ?? [],
+          unassigned: data.unassigned ?? [],
+          quality_metrics: data.quality_metrics,
+          performance_metrics: data.performance_metrics,
+          diagnostics: data.diagnostics,
+        },
+      ]
+    },
+    [],
+  )
+
+  const buildPreviewFromAssignments = useCallback(
+    (assignments: Assignment[]) =>
+      assignments.map((assignment) => {
         const course = courseMap.get(assignment.course_id)
         const timeslot = timeslotMap.get(assignment.timeslot_id)
         const room = roomMap.get(assignment.room_id)
@@ -1147,15 +1156,11 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
         const teacherName = course?.teacher_id ? userMap.get(teacherMap.get(course.teacher_id)?.user_id ?? 0) : null
         const slotStartMinutes = timeslot ? timeStringToMinutes(timeslot.start_time) : null
         const startOffset = assignment.start_offset_minutes ?? 0
-        const durationMinutes =
-          assignment.duration_minutes ??
-          (timeslot ? Math.round(durationInHours(timeslot.start_time, timeslot.end_time) * 60) : 0)
+        const durationMinutes = assignment.duration_minutes ?? (timeslot ? Math.round(durationInHours(timeslot.start_time, timeslot.end_time) * 60) : 0)
         const startMinutesAbsolute = slotStartMinutes != null ? slotStartMinutes + startOffset : null
-        const endMinutesAbsolute =
-          startMinutesAbsolute != null ? startMinutesAbsolute + durationMinutes : timeStringToMinutes(timeslot?.end_time)
+        const endMinutesAbsolute = startMinutesAbsolute != null ? startMinutesAbsolute + durationMinutes : timeStringToMinutes(timeslot?.end_time)
         const startLabel = minutesToTimeString(startMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.start_time) : undefined)
         const endLabel = minutesToTimeString(endMinutesAbsolute) ?? (timeslot ? timeLabel(timeslot.end_time) : undefined)
-
         return {
           course_id: assignment.course_id,
           course_name: subjectName
@@ -1172,88 +1177,68 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
           duration_minutes: durationMinutes,
           start_offset_minutes: assignment.start_offset_minutes ?? 0,
         }
-      })
-    },
+      }),
     [courseMap, roomMap, subjectMap, teacherMap, timeslotMap, userMap],
   )
 
-  const buildSummary = useCallback(
-    (performance?: PerformanceMetrics | null, unassigned?: OptimizerUnassigned[]): OptimizerProposalSummary => {
-      const pendingList = unassigned ?? []
-      return {
-        assigned_courses: performance?.assigned_courses ?? 0,
-        requested_courses: performance?.requested_courses ?? courses.length,
-        fill_rate: performance?.fill_rate ?? 0,
-        pending_courses: pendingList.length,
-        pending_minutes: pendingList.reduce((acc, item) => acc + item.remaining_minutes, 0),
-      }
-    },
-    [courses.length],
-  )
-
-  const normalizeProposals = useCallback(
-    (response: OptimizerResponse): OptimizerProposal[] => {
-      if (response.proposals && response.proposals.length > 0) {
-        return response.proposals.map((proposal) => ({
-          ...proposal,
-          quality_metrics: proposal.quality_metrics ?? null,
-          performance_metrics: proposal.performance_metrics ?? null,
-          diagnostics: proposal.diagnostics ?? null,
-          summary: proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned),
-        }))
-      }
-
-      const fallbackAssignments = response.assignments ?? []
-      const fallbackUnassigned = response.unassigned ?? []
-      return [
-        {
-          algorithm: response.recommended_algorithm ?? 'Greedy',
-          is_recommended: true,
-          rank: 0,
-          assignments: fallbackAssignments,
-          unassigned: fallbackUnassigned,
-          quality_metrics: response.quality_metrics ?? null,
-          performance_metrics: response.performance_metrics ?? null,
-          diagnostics: response.diagnostics ?? null,
-          summary: buildSummary(response.performance_metrics, fallbackUnassigned),
-        },
-      ]
-    },
-    [buildSummary],
-  )
-
-  const applyProposalSnapshot = useCallback(
+  const applyProposalSelection = useCallback(
     (proposal: OptimizerProposal | null) => {
       if (!proposal) {
+        setSelectedStrategy(null)
         setOptimizerAssignments([])
         setOptimizerPreview([])
+        setUnassigned([])
         setQualityMetrics(null)
         setPerformanceMetrics(null)
         setDiagnostics(null)
         return
       }
-      const assignments = proposal.assignments ?? []
-      setOptimizerAssignments(assignments)
-      setOptimizerPreview(buildPreviewEntries(assignments))
+
+      const parsedAssignments: Assignment[] = proposal.assignments.map((assignment) => ({
+        course_id: assignment.course_id,
+        room_id: assignment.room_id,
+        timeslot_id: assignment.timeslot_id,
+        duration_minutes: assignment.duration_minutes,
+        start_offset_minutes: assignment.start_offset_minutes,
+      }))
+      const preview = buildPreviewFromAssignments(parsedAssignments)
+      setSelectedStrategy(proposal.strategy)
+      setOptimizerAssignments(parsedAssignments)
+      setOptimizerPreview(preview)
       setQualityMetrics(proposal.quality_metrics ?? null)
       setPerformanceMetrics(proposal.performance_metrics ?? null)
       setDiagnostics(proposal.diagnostics ?? null)
+      setUnassigned(proposal.unassigned ?? [])
     },
-    [buildPreviewEntries],
+    [buildPreviewFromAssignments],
   )
 
-  const resolvedProposal = useMemo(() => {
-    if (optimizerProposals.length === 0) return null
-    if (selectedProposalKey) {
-      const match = optimizerProposals.find((proposal) => proposal.algorithm === selectedProposalKey)
-      if (match) return match
-    }
-    return optimizerProposals[0]
-  }, [optimizerProposals, selectedProposalKey])
+  const handleProposalChange = useCallback(
+    (value: string | null) => {
+      const target = proposals.find((proposal) => proposal.strategy === value) ?? null
+      applyProposalSelection(target)
+    },
+    [applyProposalSelection, proposals],
+  )
+
+  const proposalOptions = useMemo(
+    () =>
+      proposals.map((proposal) => {
+        const assigned = proposal.performance_metrics?.assigned_courses ?? proposal.assignments.length
+        const requested = proposal.performance_metrics?.requested_courses
+        const label = requested ? `${assigned}/${requested} cursos` : `${assigned} cursos`
+        return { value: proposal.strategy, label: `${proposal.strategy} · ${label}` }
+      }),
+    [proposals],
+  )
 
   useEffect(() => {
-    applyProposalSnapshot(resolvedProposal)
-  }, [applyProposalSnapshot, resolvedProposal])
+    if (proposals.length === 0) return
+    const exists = proposals.some((proposal) => proposal.strategy === selectedStrategy)
+    if (!exists) {
+      applyProposalSelection(proposals[0])
+    }
+  }, [applyProposalSelection, proposals, selectedStrategy])
 
   const runOptimizer = useCallback(async () => {
     if (!selectedSemester) {
@@ -1319,38 +1304,29 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       }
 
       const { data } = await api.post<OptimizerResponse>('/schedule/optimize', payload)
-      const proposals = normalizeProposals(data)
-      if (proposals.length === 0) {
-        setOptimizerProposals([])
-        setSelectedProposalKey(null)
-        setSuccess('El optimizador no generó propuestas válidas.')
-        return
-      }
+      const normalized = normalizeResponseProposals(data)
+      setProposals(normalized)
+      const initialProposal = normalized.find((item) => item.strategy === data.selected_strategy) ?? normalized[0] ?? null
+      applyProposalSelection(initialProposal)
 
-      setOptimizerProposals(proposals)
-      const preferredKey = data.recommended_algorithm && proposals.some((proposal) => proposal.algorithm === data.recommended_algorithm)
-        ? data.recommended_algorithm
-        : proposals[0].algorithm
-      setSelectedProposalKey(preferredKey)
-
-      const recommendedProposal = proposals.find((proposal) => proposal.algorithm === preferredKey) ?? proposals[0]
-      const assignmentCount = recommendedProposal.assignments?.length ?? 0
-      const pendingList = recommendedProposal.unassigned ?? []
-      if (pendingList.length > 0) {
-        const detail = pendingList
+      const selectedAssignments = initialProposal?.assignments ?? []
+      const unassignedItems = initialProposal?.unassigned ?? []
+      if (unassignedItems.length > 0) {
+        const detail = unassignedItems
           .map((item) => {
             const courseLabel = courseLookup.get(item.course_id)?.label ?? `Curso #${item.course_id}`
             return `${courseLabel}: ${formatMinutesLabel(item.remaining_minutes)}`
           })
           .join(', ')
-        setSuccess(`Propuesta ${recommendedProposal.algorithm}: ${assignmentCount} bloques sugeridos. Pendiente: ${detail}.`)
+        setSuccess(`Optimización parcial: ${selectedAssignments.length} bloques sugeridos. Pendiente: ${detail}.`)
       } else {
-        const assignmentLabel = assignmentCount === 1 ? 'bloque sugerido' : 'bloques sugeridos'
-        setSuccess(`Propuesta ${recommendedProposal.algorithm}: ${assignmentCount} ${assignmentLabel} listos para revisión.`)
+        setSuccess(`Optimización generó ${selectedAssignments.length} bloques sugeridos.`)
       }
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo optimizar el horario'
       setError(detail)
+      setProposals([])
+      setSelectedStrategy(null)
     } finally {
       setOptimizerLoading(false)
     }
@@ -1361,10 +1337,10 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
     buildTimeslotBlocks,
     maxDailyHours,
     courseLookup,
-    timeslotMap,
     globalSchedule,
     schedule,
-    normalizeProposals,
+    normalizeResponseProposals,
+    applyProposalSelection,
   ])
 
   const handleApplyOptimized = useCallback(async () => {
@@ -1381,11 +1357,8 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
       await loadSemesterData(Number(selectedSemester))
       setOptimizerAssignments([])
       setOptimizerPreview([])
-      setOptimizerProposals([])
-      setSelectedProposalKey(null)
-      setQualityMetrics(null)
-      setPerformanceMetrics(null)
-      setDiagnostics(null)
+      setProposals([])
+      setSelectedStrategy(null)
       setSuccess('Horario aplicado correctamente')
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo guardar el horario sugerido'
@@ -2004,19 +1977,24 @@ export default function SchedulePlanner({ onCourseFullyScheduled }: SchedulePlan
             maw={220}
           />
 
-          {optimizerProposals.length > 0 && (
+          {proposals.length > 0 && (
             <Select
-              label="Comparar algoritmos"
-              description="Elige la propuesta a revisar"
+              label="Propuesta generada"
+              placeholder="Selecciona la estrategia"
               data={proposalOptions}
-              value={selectedProposalKey}
-              onChange={setSelectedProposalKey}
-              maw={360}
+              value={selectedStrategy}
+              onChange={handleProposalChange}
+              maw={320}
             />
           )}
 
           <Group gap="sm">
-            <Button leftSection={<IconRun size={18} />} loading={optimizerLoading} onClick={() => runOptimizer()}>
+            <Button
+              leftSection={<IconRun size={18} />}
+              loading={optimizerLoading}
+              onClick={() => runOptimizer()}
+              disabled={!selectedSemester || courses.length === 0}
+            >
               Ejecutar optimizador
             </Button>
             {optimizerAssignments.length > 0 && (

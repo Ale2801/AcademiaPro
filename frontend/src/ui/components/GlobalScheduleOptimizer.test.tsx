@@ -79,71 +79,66 @@ function setupMocks() {
 
   postMock.mockImplementation((path: string) => {
     if (path === '/schedule/optimize') {
-      const assignments = [
-        {
-          course_id: sampleCourse.id,
-          room_id: sampleRoom.id,
-          timeslot_id: sampleTimeslot.id,
-          duration_minutes: 90,
-          start_offset_minutes: 0,
-        },
-      ]
-      const unassigned: any[] = []
-      const performanceMetrics = {
-        runtime_seconds: 0.42,
-        requested_courses: 1,
-        assigned_courses: 1,
-        requested_minutes: 180,
-        assigned_minutes: 135,
-        fill_rate: 0.75,
-      }
-      const diagnostics = { messages: ['Ejecución base'], unassigned_causes: {} }
-      const graspQuality = { ...sampleQualityMetrics, balance_score: 88.1 }
-      const graspPerformance = { ...performanceMetrics, fill_rate: 0.92 }
       return Promise.resolve({
         data: {
-          assignments,
-          unassigned,
+          assignments: [
+            {
+              course_id: sampleCourse.id,
+              room_id: sampleRoom.id,
+              timeslot_id: sampleTimeslot.id,
+              duration_minutes: 90,
+              start_offset_minutes: 0,
+            },
+          ],
+          unassigned: [],
           quality_metrics: sampleQualityMetrics,
-          performance_metrics: performanceMetrics,
-          diagnostics,
-          recommended_algorithm: 'Greedy',
+          performance_metrics: {
+            runtime_seconds: 0.321,
+            requested_courses: 1,
+            assigned_courses: 1,
+            requested_minutes: 180,
+            assigned_minutes: 180,
+            fill_rate: 1,
+          },
           proposals: [
             {
-              algorithm: 'Greedy',
-              is_recommended: true,
-              rank: 0,
-              assignments,
-              unassigned,
+              strategy: 'Greedy',
+              assignments: [
+                {
+                  course_id: sampleCourse.id,
+                  room_id: sampleRoom.id,
+                  timeslot_id: sampleTimeslot.id,
+                  duration_minutes: 90,
+                  start_offset_minutes: 0,
+                },
+              ],
+              unassigned: [],
               quality_metrics: sampleQualityMetrics,
-              performance_metrics: performanceMetrics,
-              diagnostics,
-              summary: {
-                assigned_courses: performanceMetrics.assigned_courses,
-                requested_courses: performanceMetrics.requested_courses,
-                fill_rate: performanceMetrics.fill_rate,
-                pending_courses: 0,
-                pending_minutes: 0,
+              performance_metrics: {
+                runtime_seconds: 0.321,
+                requested_courses: 1,
+                assigned_courses: 1,
+                requested_minutes: 180,
+                assigned_minutes: 180,
+                fill_rate: 1,
               },
             },
             {
-              algorithm: 'GRASP',
-              is_recommended: false,
-              rank: 1,
-              assignments,
-              unassigned,
-              quality_metrics: graspQuality,
-              performance_metrics: graspPerformance,
-              diagnostics: { messages: ['Alternativa refinada'], unassigned_causes: {} },
-              summary: {
-                assigned_courses: graspPerformance.assigned_courses,
-                requested_courses: graspPerformance.requested_courses,
-                fill_rate: graspPerformance.fill_rate,
-                pending_courses: 0,
-                pending_minutes: 0,
+              strategy: 'GRASP',
+              assignments: [],
+              unassigned: [{ course_id: sampleCourse.id, remaining_minutes: 180 }],
+              quality_metrics: { ...sampleQualityMetrics, balance_score: 50 },
+              performance_metrics: {
+                runtime_seconds: 0.5,
+                requested_courses: 1,
+                assigned_courses: 0,
+                requested_minutes: 180,
+                assigned_minutes: 0,
+                fill_rate: 0,
               },
             },
           ],
+          selected_strategy: 'Greedy',
         },
       })
     }
@@ -204,7 +199,7 @@ describe('GlobalScheduleOptimizer', () => {
 
     expect(await screen.findByText('Cálculo diferencial · Grupo A')).toBeInTheDocument()
     expect(screen.getByText('A-101')).toBeInTheDocument()
-    expect(screen.getByText('Optimizador global · Greedy: 1 bloque sugerido listos para revisión.')).toBeInTheDocument()
+    expect(screen.getByText('Optimizador global: 1 bloque sugerido listo para revisión.')).toBeInTheDocument()
     expect(screen.getByText('75.5%')).toBeInTheDocument()
 
     const applyButton = screen.getByRole('button', { name: 'Aplicar propuesta global' })
@@ -224,6 +219,24 @@ describe('GlobalScheduleOptimizer', () => {
     ])
     expect(screen.getByText('Propuesta global aplicada y publicada en el horario institucional.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Aplicar propuesta global' })).not.toBeInTheDocument()
+  })
+
+  it('permite alternar entre propuestas y refleja métricas de la estrategia seleccionada', async () => {
+    renderOptimizer()
+
+    await waitFor(() => expect(getMock).toHaveBeenCalledWith('/programs/'))
+
+    const runButton = await screen.findByRole('button', { name: /Optimizar horarios globales/i })
+    fireEvent.click(runButton)
+
+    const [selector] = await screen.findAllByLabelText('Propuesta generada')
+    expect(screen.getByText('Greedy · 1/1 cursos')).toBeInTheDocument()
+
+    fireEvent.mouseDown(selector)
+    const graspOption = await screen.findByText('GRASP · 0/1 cursos')
+    fireEvent.click(graspOption)
+
+    await waitFor(() => expect(screen.getByText(/Cobertura 0.0%/i)).toBeInTheDocument())
   })
 
   it('muestra un error cuando aplicar la propuesta global falla', async () => {
@@ -253,25 +266,6 @@ describe('GlobalScheduleOptimizer', () => {
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2))
     expect(screen.getByText('No se pudo aplicar la propuesta global')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aplicar propuesta global' })).toBeInTheDocument()
-  })
-
-  it('permite elegir distintos algoritmos y refresca las métricas globales', async () => {
-    renderOptimizer()
-
-    await waitFor(() => expect(getMock).toHaveBeenCalledWith('/programs/'))
-
-    const runButton = await screen.findByRole('button', { name: /Optimizar horarios globales/i })
-    fireEvent.click(runButton)
-
-    const selectControl = await screen.findByLabelText('Comparar algoritmos')
-    expect(selectControl).toBeInTheDocument()
-    expect(screen.getByText('75.5%')).toBeInTheDocument()
-
-    fireEvent.click(selectControl)
-    const graspOption = await screen.findByText('GRASP · 1/1 cursos')
-    fireEvent.click(graspOption)
-
-    await waitFor(() => expect(screen.getByText('88.1%')).toBeInTheDocument())
   })
 
   it('muestra métricas de desempeño y diagnósticos del optimizador global', async () => {
@@ -308,46 +302,6 @@ describe('GlobalScheduleOptimizer', () => {
               [String(sampleCourse.id)]: 'El docente ya tenía compromisos en todos sus bloques disponibles.',
             },
           },
-          recommended_algorithm: 'Greedy',
-          proposals: [
-            {
-              algorithm: 'Greedy',
-              is_recommended: true,
-              rank: 0,
-              assignments: [
-                {
-                  course_id: sampleCourse.id,
-                  room_id: sampleRoom.id,
-                  timeslot_id: sampleTimeslot.id,
-                  duration_minutes: 90,
-                  start_offset_minutes: 0,
-                },
-              ],
-              unassigned: [{ course_id: sampleCourse.id, remaining_minutes: 45 }],
-              quality_metrics: sampleQualityMetrics,
-              performance_metrics: {
-                runtime_seconds: 0.789,
-                requested_courses: 1,
-                assigned_courses: 1,
-                requested_minutes: 180,
-                assigned_minutes: 135,
-                fill_rate: 0.75,
-              },
-              diagnostics: {
-                messages: ['Ejecución completada en 0.789 s.', 'Se asignaron 1 de 1 cursos solicitados.'],
-                unassigned_causes: {
-                  [String(sampleCourse.id)]: 'El docente ya tenía compromisos en todos sus bloques disponibles.',
-                },
-              },
-              summary: {
-                assigned_courses: 1,
-                requested_courses: 1,
-                fill_rate: 0.75,
-                pending_courses: 1,
-                pending_minutes: 45,
-              },
-            },
-          ],
         },
       })
     })

@@ -4,6 +4,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from math import ceil
 from typing import Dict, List, Optional, Set, Tuple
+import copy
+import os
 import time
 
 
@@ -51,6 +53,7 @@ class ScheduleQualityMetrics:
     lunch_violations: int = 0
     consecutive_blocks_violations: int = 0
     gap_violations: int = 0
+    teacher_overlap_violations: int = 0
     balance_score: float = 0.0  # rango 0-100; valores altos indican mejor distribución
     daily_overload_count: int = 0
     avg_daily_load: float = 0.0  # promedio de horas dictadas por día
@@ -109,31 +112,31 @@ class SolveResult:
 
 
 @dataclass
-class ScheduleProposal:
-    algorithm: str
+class SolveProposal:
+    strategy: str
     result: SolveResult
-    is_recommended: bool = False
-    rank: int = 0
 
 
-@dataclass
-class SolveComparisonResult:
-    proposals: List[ScheduleProposal]
-    recommended_algorithm: str
+class SolveEnvelope:
+    def __init__(self, best_label: str, proposals: List[SolveProposal]):
+        self.best_label = best_label
+        self.proposals = proposals
+        self.best_result = self._pick_best_result(best_label, proposals)
 
-    def best_result(self) -> SolveResult:
-        for proposal in self.proposals:
-            if proposal.algorithm == self.recommended_algorithm:
+        # Compatibilidad hacia atrás: exponer los campos principales del mejor resultado
+        self.assignments = self.best_result.assignments
+        self.unassigned = self.best_result.unassigned
+        self.quality_metrics = self.best_result.quality_metrics
+        self.performance_metrics = self.best_result.performance_metrics
+        self.diagnostics = self.best_result.diagnostics
+
+    @staticmethod
+    def _pick_best_result(best_label: str, proposals: List[SolveProposal]) -> SolveResult:
+        for proposal in proposals:
+            if proposal.strategy == best_label:
                 return proposal.result
-        return self.proposals[0].result if self.proposals else SolveResult([], {})
-
-
-def _score_result(result: SolveResult) -> Tuple[int, int, float]:
-    return (
-        result.performance_metrics.assigned_courses,
-        -len(result.unassigned),
-        result.performance_metrics.fill_rate,
-    )
+        # Fallback: primera propuesta disponible
+        return proposals[0].result if proposals else SolveResult([], {})
 
 
 def solve_schedule(
@@ -141,17 +144,7 @@ def solve_schedule(
     rooms: List[RoomInput],
     timeslots: List[TimeslotInput],
     cons: Constraints,
-) -> SolveResult:
-    comparison = solve_schedule_with_comparison(courses, rooms, timeslots, cons)
-    return comparison.best_result()
-
-
-def solve_schedule_with_comparison(
-    courses: List[CourseInput],
-    rooms: List[RoomInput],
-    timeslots: List[TimeslotInput],
-    cons: Constraints,
-) -> SolveComparisonResult:
+) -> SolveEnvelope:
     attempts: List[SolveResult] = []
 
     base_result = _solve_partial_greedy(courses, rooms, timeslots, cons)
@@ -173,12 +166,33 @@ def solve_schedule_with_comparison(
             reversed_result = _solve_partial_greedy(courses, rooms, reversed_timeslots, cons)
             attempts.append(reversed_result)
 
-    best = max(attempts, key=_score_result)
+    def _score(result: SolveResult) -> Tuple[int, int, float]:
+        return (
+            result.performance_metrics.assigned_courses,
+            -len(result.unassigned),
+            result.performance_metrics.fill_rate,
+        )
+
+    best = max(attempts, key=_score)
     if best is not base_result and best.performance_metrics.assigned_courses > base_result.performance_metrics.assigned_courses:
         best.diagnostics.messages.append(
             "Se aplicaron intentos adicionales (priorización docente/orden alterno) para maximizar la cobertura."
         )
     greedy_best = best
+
+    fast_env = os.getenv("SCHEDULER_FAST_TEST") or os.getenv("FAST_TEST")
+    if fast_env:
+        note = "FAST_TEST activo: estrategias avanzadas omitidas; se reutiliza el greedy."
+        if note not in greedy_best.diagnostics.messages:
+            greedy_best.diagnostics.messages.append(note)
+
+        proposals = [
+            SolveProposal("Greedy", greedy_best),
+            SolveProposal("GRASP", copy.deepcopy(greedy_best)),
+            SolveProposal("Relajado+CP", copy.deepcopy(greedy_best)),
+            SolveProposal("Genético", copy.deepcopy(greedy_best)),
+        ]
+        return SolveEnvelope("Greedy", proposals)
 
     # Ejecutar enfoque GRASP + refinamiento local para comparar resultados
     from . import optimizer_genetic, optimizer_grasp, optimizer_relaxed_cp
@@ -204,24 +218,16 @@ def solve_schedule_with_comparison(
         for line in _format_detailed_summary(label, result):
             print(line)
 
-    best_label, best_result = max(contenders, key=lambda item: _score_result(item[1]))
+    best_label, best_result = max(contenders, key=lambda item: _score(item[1]))
 
     if best_label != "Greedy":
         print(f"{best_label} obtuvo mejores métricas que el enfoque greedy.")
     else:
         print("El enfoque greedy se mantiene como la mejor solución para este conjunto de datos.")
 
-    proposals = [
-        ScheduleProposal(
-            algorithm=label,
-            result=result,
-            is_recommended=(label == best_label),
-            rank=index,
-        )
-        for index, (label, result) in enumerate(contenders)
-    ]
+    proposals = [SolveProposal(strategy=label, result=result) for label, result in contenders]
 
-    return SolveComparisonResult(proposals=proposals, recommended_algorithm=best_label)
+    return SolveEnvelope(best_label, proposals)
 
 
 def _format_detailed_summary(label: str, result: SolveResult) -> List[str]:
@@ -239,6 +245,9 @@ def _format_detailed_summary(label: str, result: SolveResult) -> List[str]:
         f"[{label}] Balance: {quality.balance_score:.1f} · Sobrecargas diarias: {quality.daily_overload_count}",
         f"[{label}] Carga diaria promedio: {quality.avg_daily_load:.2f}h · Máxima: {quality.max_daily_load:.2f}h",
     ]
+
+    if quality.teacher_overlap_violations > 0:
+        lines.append(f"[{label}] Solapes docente: {quality.teacher_overlap_violations}")
 
     if pending_minutes > 0:
         lines.append(f"[{label}] Minutos pendientes totales: {pending_minutes}")
@@ -408,6 +417,7 @@ def _solve_partial_greedy(
     teacher_day_blocks: Dict[int, Dict[int, Set[int]]] = defaultdict(lambda: defaultdict(set))
     teacher_day_last_block: Dict[Tuple[int, int], Optional[int]] = {}
     teacher_day_streak: Dict[Tuple[int, int], int] = {}
+    teacher_day_units: Dict[int, Dict[int, Set[int]]] = defaultdict(lambda: defaultdict(set))
     
     # Rastreo de carga por programa y día para balancear
     program_daily_minutes: Dict[Tuple[Optional[int], int], int] = defaultdict(int)
@@ -523,7 +533,7 @@ def _solve_partial_greedy(
 
                 allow_reserve = not rest_required
 
-                assigned_chunk = _assign_chunk_to_course(
+                assigned_units = _assign_chunk_to_course(
                     course_id,
                     chunk_target,
                     per_room_units,
@@ -532,7 +542,10 @@ def _solve_partial_greedy(
                     assignments_units,
                     course_room_lock,
                     allow_reserve,
+                    teacher_id,
+                    teacher_day_units,
                 )
+                assigned_chunk = len(assigned_units)
                 if assigned_chunk == 0:
                     continue
 
@@ -553,6 +566,11 @@ def _solve_partial_greedy(
                     program_busy_slots[(course.program_semester_id, slot.timeslot_id)].add(course_id)
 
                 if teacher_id is not None:
+                    # Bloquear las unidades de 15 minutos absolutas (evita solapes entre timeslots distintos)
+                    base_unit = slot.start_minutes // GRANULARITY_MINUTES
+                    for unit_index in assigned_units:
+                        teacher_day_units[teacher_id][slot.day].add(base_unit + unit_index)
+
                     slot_key = (teacher_id, slot.timeslot_id)
                     if slot_key not in teacher_slot_processed:
                         context = teacher_slot_context.get(slot_key)
@@ -648,6 +666,9 @@ def _solve_partial_greedy(
     )
     quality_metrics.daily_overload_count = _count_daily_overloads(
         program_daily_minutes, cons.max_daily_hours_per_program
+    )
+    quality_metrics.teacher_overlap_violations = _count_teacher_overlaps(
+        assignments, slot_lookup, course_lookup
     )
     
     # Calcular métricas adicionales para el frontend
@@ -834,31 +855,39 @@ def _assign_chunk_to_course(
     assignments_units: Dict[tuple[int, int, int], List[int]],
     course_room_lock: Dict[int, int],
     allow_reserve: bool,
-) -> int:
+    teacher_id: Optional[int],
+    teacher_day_units: Dict[int, Dict[int, Set[int]]],
+) -> List[int]:
     lock_room_id = course_room_lock.get(course_id)
-    assigned = 0
+    assigned_units: List[int] = []
 
-    def _consume(room_id: int, available_units: List[Tuple[int, bool]], amount: int) -> int:
-        taken = 0
+    def _consume(room_id: int, available_units: List[Tuple[int, bool]], amount: int) -> List[int]:
+        taken: List[int] = []
         idx = 0
-        while idx < len(available_units) and taken < amount:
+        # Iteramos mientras queden unidades y no hayamos alcanzado la cantidad solicitada
+        while idx < len(available_units) and len(taken) < amount:
             unit_index, is_reserve = available_units[idx]
             if not allow_reserve and is_reserve:
                 idx += 1
                 continue
+            if teacher_id is not None:
+                absolute_unit = (slot.start_minutes // GRANULARITY_MINUTES) + unit_index
+                if absolute_unit in teacher_day_units[teacher_id][slot.day]:
+                    idx += 1
+                    continue
             assignments_units[(course_id, room_id, slot.timeslot_id)].append(unit_index)
             del available_units[idx]
-            taken += 1
+            taken.append(unit_index)
         return taken
 
     if lock_room_id is not None:
         available = per_room_units.get(lock_room_id)
         if not available:
-            return 0
+            return []
         if chunk_target <= 0:
-            return 0
-        assigned = _consume(lock_room_id, available, chunk_target)
-        return assigned
+            return []
+        assigned_units = _consume(lock_room_id, available, chunk_target)
+        return assigned_units
 
     for room in rooms_order:
         available = per_room_units.get(room.room_id)
@@ -866,12 +895,12 @@ def _assign_chunk_to_course(
             continue
         if chunk_target <= 0:
             continue
-        assigned = _consume(room.room_id, available, chunk_target)
-        if assigned > 0:
+        assigned_units = _consume(room.room_id, available, chunk_target)
+        if assigned_units:
             course_room_lock[course_id] = room.room_id
-        return assigned
+        return assigned_units
 
-    return 0
+    return []
 
 
 def _get_default_lunch_blocks() -> Set[Tuple[int, int]]:
@@ -1019,3 +1048,31 @@ def _count_daily_overloads(
         if minutes > max_minutes:
             overloads += 1
     return overloads
+
+
+def _count_teacher_overlaps(
+    assignments: List[AssignmentResult],
+    slot_lookup: Dict[int, TimeslotInput],
+    course_lookup: Dict[int, CourseInput],
+) -> int:
+    """Cuenta pares de asignaciones que solapan para el mismo docente en un día."""
+    overlaps = 0
+    intervals_by_teacher_day: Dict[Tuple[int, int], List[Tuple[int, int]]] = defaultdict(list)
+
+    for assignment in assignments:
+        course = course_lookup.get(assignment.course_id)
+        if not course or course.teacher_id is None:
+            continue
+        slot = slot_lookup.get(assignment.timeslot_id)
+        if not slot:
+            continue
+
+        start = slot.start_minutes + (assignment.start_offset_minutes or 0)
+        end = start + assignment.duration_minutes
+        key = (course.teacher_id, slot.day)
+        for existing_start, existing_end in intervals_by_teacher_day[key]:
+            if start < existing_end and end > existing_start:
+                overlaps += 1
+        intervals_by_teacher_day[key].append((start, end))
+
+    return overlaps

@@ -103,7 +103,11 @@ def _ensure_timeslot_at(
 ) -> Dict[str, Any]:
     listing = client.get("/timeslots/", headers=headers).json()
     for slot in listing:
-        if slot["day_of_week"] == day_of_week and slot["start_time"].startswith(start_time):
+        if (
+            slot["day_of_week"] == day_of_week
+            and slot["start_time"].startswith(start_time)
+            and slot["end_time"].startswith(end_time)
+        ):
             return slot
     payload = {
         "day_of_week": day_of_week,
@@ -245,6 +249,40 @@ def test_scheduler_optimize_basic(client: TestClient, admin_token: str):
     diagnostics = data["diagnostics"]
     assert isinstance(diagnostics.get("messages"), list)
     assert diagnostics["messages"]
+
+
+def test_scheduler_optimize_includes_all_strategies(client: TestClient, admin_token: str):
+    headers = _auth_headers(admin_token)
+    entities = _ensure_schedule_entities(client, headers)
+    course = entities["course"]
+    room = entities["room"]
+
+    slot_one = _ensure_timeslot_at(client, headers, day_of_week=0, start_time="08:00", end_time="09:00")
+    slot_two = _ensure_timeslot_at(client, headers, day_of_week=0, start_time="09:00", end_time="10:00")
+
+    payload = {
+        "courses": [
+            {"course_id": course["id"], "teacher_id": course["teacher_id"], "weekly_hours": 2},
+        ],
+        "rooms": [
+            {"room_id": room["id"], "capacity": room.get("capacity", 30)},
+        ],
+        "timeslots": [
+            {"timeslot_id": slot_one["id"], "day": slot_one["day_of_week"], "block": 1},
+            {"timeslot_id": slot_two["id"], "day": slot_two["day_of_week"], "block": 2},
+        ],
+        "constraints": {
+            "teacher_availability": {course["teacher_id"]: [slot_one["id"], slot_two["id"]]},
+        },
+    }
+
+    response = client.post("/schedule/optimize", json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    strategies = {item["strategy"] for item in data.get("proposals", [])}
+    assert {"Greedy", "GRASP", "Relajado+CP", "Genético"}.issubset(strategies)
+    assert data.get("selected_strategy") in strategies
 
 
 def test_scheduler_reports_unassigned_diagnostics(client: TestClient, admin_token: str):

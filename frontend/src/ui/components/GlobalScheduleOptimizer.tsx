@@ -37,16 +37,6 @@ function timeStringToMinutes(value?: string | null): number | null {
   const trimmed = value.trim()
   if (!trimmed) return null
   const parts = trimmed.split(':')
-          {optimizerProposals.length > 0 && (
-            <Select
-              label="Comparar algoritmos"
-              description="Elige qué propuesta quieres revisar"
-              data={proposalOptions}
-              value={selectedProposalKey}
-              onChange={setSelectedProposalKey}
-              maw={360}
-            />
-          )}
   if (parts.length < 2) return null
   const [hoursStr, minutesStr, secondsStr] = parts
   const hours = Number(hoursStr)
@@ -177,24 +167,13 @@ type OptimizerDiagnostics = {
   unassigned_causes?: Record<string, string>
 }
 
-type OptimizerProposalSummary = {
-  assigned_courses: number
-  requested_courses: number
-  fill_rate: number
-  pending_courses: number
-  pending_minutes: number
-}
-
 type OptimizerProposal = {
-  algorithm: string
-  is_recommended?: boolean
-  rank?: number
+  strategy: string
   assignments: OptimizerAssignment[]
   unassigned?: OptimizerUnassigned[]
-  quality_metrics?: QualityMetrics | null
-  performance_metrics?: PerformanceMetrics | null
-  diagnostics?: OptimizerDiagnostics | null
-  summary?: OptimizerProposalSummary
+  quality_metrics?: QualityMetrics
+  performance_metrics?: PerformanceMetrics
+  diagnostics?: OptimizerDiagnostics
 }
 
 type OptimizerResponse = {
@@ -203,8 +182,8 @@ type OptimizerResponse = {
   quality_metrics?: QualityMetrics
   performance_metrics?: PerformanceMetrics
   diagnostics?: OptimizerDiagnostics
-  recommended_algorithm?: string
   proposals?: OptimizerProposal[]
+  selected_strategy?: string | null
 }
 
 type StatCard = {
@@ -256,8 +235,8 @@ export default function GlobalScheduleOptimizer() {
 
   const [previewEntries, setPreviewEntries] = useState<ScheduleEntry[]>([])
   const [optimizerAssignments, setOptimizerAssignments] = useState<OptimizerAssignment[]>([])
-  const [optimizerProposals, setOptimizerProposals] = useState<OptimizerProposal[]>([])
-  const [selectedProposalKey, setSelectedProposalKey] = useState<string | null>(null)
+  const [proposals, setProposals] = useState<OptimizerProposal[]>([])
+  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null)
   const [unassigned, setUnassigned] = useState<OptimizerUnassigned[]>([])
   const [qualityMetrics, setQualityMetrics] = useState<QualityMetrics | null>(null)
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
@@ -287,11 +266,11 @@ export default function GlobalScheduleOptimizer() {
       setTimeslots(timeslotsRes.data as Timeslot[])
       setSubjects(subjectsRes.data as Subject[])
       setTeachers(teachersRes.data as Teacher[])
-    setUsers(usersRes.data as User[])
-  setPreviewEntries([])
-  setOptimizerAssignments([])
-      setOptimizerProposals([])
-      setSelectedProposalKey(null)
+      setUsers(usersRes.data as User[])
+      setPreviewEntries([])
+      setOptimizerAssignments([])
+      setProposals([])
+      setSelectedStrategy(null)
       setUnassigned([])
       setQualityMetrics(null)
       setPerformanceMetrics(null)
@@ -317,50 +296,6 @@ export default function GlobalScheduleOptimizer() {
   const roomMap = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
   const timeslotMap = useMemo(() => new Map(timeslots.map((slot) => [slot.id, slot])), [timeslots])
   const courseMap = useMemo(() => new Map(courses.map((course) => [course.id, course])), [courses])
-
-  const buildPreviewEntries = useCallback(
-    (assignments: OptimizerAssignment[]): ScheduleEntry[] => {
-      return assignments.map((assignment) => {
-        const course = courseMap.get(assignment.course_id)
-        const subjectName = course ? subjectMap.get(course.subject_id) : undefined
-        const semester = course?.program_semester_id != null ? semesterMap.get(course.program_semester_id) : undefined
-        const program = semester ? programMap.get(semester.program_id) : undefined
-        const teacher = course?.teacher_id != null ? teacherMap.get(course.teacher_id) : undefined
-        const teacherName = teacher?.user_id != null ? userMap.get(teacher.user_id) : undefined
-        const courseLabelParts: string[] = []
-        if (subjectName) courseLabelParts.push(subjectName)
-        if (course?.group) courseLabelParts.push(`Grupo ${course.group}`)
-        const courseLabel = courseLabelParts.length > 0 ? courseLabelParts.join(' · ') : `Curso #${assignment.course_id}`
-        const semesterLabel = semester?.label || (semester?.semester_number != null ? `Semestre ${semester.semester_number}` : undefined)
-        const timeslot = timeslotMap.get(assignment.timeslot_id)
-        const room = roomMap.get(assignment.room_id)
-        const slotStart = timeslot ? timeStringToMinutes(timeslot.start_time) : null
-        const durationMinutes = assignment.duration_minutes ?? (timeslot ? durationBetween(timeslot.start_time, timeslot.end_time) : 0)
-        const offset = assignment.start_offset_minutes ?? 0
-        const startLabel = minutesToTimeString(slotStart != null ? slotStart + offset : null) || (timeslot ? timeslot.start_time.slice(0, 5) : undefined)
-        const endLabel = minutesToTimeString(slotStart != null ? slotStart + offset + durationMinutes : null) || (timeslot ? timeslot.end_time.slice(0, 5) : undefined)
-        return {
-          course_id: assignment.course_id,
-          course_name: courseLabel,
-          subject_name: subjectName,
-          room_id: assignment.room_id,
-          room_code: room?.code,
-          timeslot_id: assignment.timeslot_id,
-          day_of_week: timeslot?.day_of_week,
-          start_time: startLabel ?? undefined,
-          end_time: endLabel ?? undefined,
-          duration_minutes: durationMinutes,
-          start_offset_minutes: assignment.start_offset_minutes ?? 0,
-          teacher_name: teacherName,
-          program_id: program?.id ?? null,
-          program_semester_id: semester?.id ?? null,
-          program_semester_label: semesterLabel ?? undefined,
-        }
-      })
-    },
-    [courseMap, programMap, roomMap, semesterMap, subjectMap, teacherMap, timeslotMap, userMap],
-  )
-
 
   const programOptions = useMemo(
     () =>
@@ -424,89 +359,6 @@ export default function GlobalScheduleOptimizer() {
     return result
   }, [courses, selectedPrograms, selectedSemesters, selectedTerms, semesterMap])
 
-  const buildSummary = useCallback(
-    (
-      performance?: PerformanceMetrics | null,
-      unassigned?: OptimizerUnassigned[],
-      fallbackRequested?: number,
-    ): OptimizerProposalSummary => {
-      const pendingList = unassigned ?? []
-      return {
-        assigned_courses: performance?.assigned_courses ?? 0,
-        requested_courses: performance?.requested_courses ?? fallbackRequested ?? filteredCourses.length,
-        fill_rate: performance?.fill_rate ?? 0,
-        pending_courses: pendingList.length,
-        pending_minutes: pendingList.reduce((acc, item) => acc + item.remaining_minutes, 0),
-      }
-    },
-    [filteredCourses.length],
-  )
-
-  const normalizeProposals = useCallback(
-    (response: OptimizerResponse, fallbackRequested: number): OptimizerProposal[] => {
-      if (response.proposals && response.proposals.length > 0) {
-        return response.proposals.map((proposal) => ({
-          ...proposal,
-          quality_metrics: proposal.quality_metrics ?? null,
-          performance_metrics: proposal.performance_metrics ?? null,
-          diagnostics: proposal.diagnostics ?? null,
-          summary: proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned, fallbackRequested),
-        }))
-      }
-      const fallbackAssignments = response.assignments ?? []
-      const fallbackUnassigned = response.unassigned ?? []
-      return [
-        {
-          algorithm: response.recommended_algorithm ?? 'Greedy',
-          is_recommended: true,
-          rank: 0,
-          assignments: fallbackAssignments,
-          unassigned: fallbackUnassigned,
-          quality_metrics: response.quality_metrics ?? null,
-          performance_metrics: response.performance_metrics ?? null,
-          diagnostics: response.diagnostics ?? null,
-          summary: buildSummary(response.performance_metrics, fallbackUnassigned, fallbackRequested),
-        },
-      ]
-    },
-    [buildSummary],
-  )
-
-  const applyProposalSnapshot = useCallback(
-    (proposal: OptimizerProposal | null) => {
-      if (!proposal) {
-        setOptimizerAssignments([])
-        setPreviewEntries([])
-        setUnassigned([])
-        setQualityMetrics(null)
-        setPerformanceMetrics(null)
-        setDiagnostics(null)
-        return
-      }
-      const assignments = proposal.assignments ?? []
-      setOptimizerAssignments(assignments)
-      setPreviewEntries(buildPreviewEntries(assignments))
-      setUnassigned(proposal.unassigned ?? [])
-      setQualityMetrics(proposal.quality_metrics ?? null)
-      setPerformanceMetrics(proposal.performance_metrics ?? null)
-      setDiagnostics(proposal.diagnostics ?? null)
-    },
-    [buildPreviewEntries],
-  )
-
-  const resolvedProposal = useMemo(() => {
-    if (optimizerProposals.length === 0) return null
-    if (selectedProposalKey) {
-      const match = optimizerProposals.find((proposal) => proposal.algorithm === selectedProposalKey)
-      if (match) return match
-    }
-    return optimizerProposals[0]
-  }, [optimizerProposals, selectedProposalKey])
-
-  useEffect(() => {
-    applyProposalSnapshot(resolvedProposal)
-  }, [applyProposalSnapshot, resolvedProposal])
-
   const totalWeeklyHours = useMemo(() =>
     filteredCourses.reduce((acc, course) => {
       const hours = Number(course.weekly_hours ?? 0)
@@ -561,24 +413,6 @@ export default function GlobalScheduleOptimizer() {
   [filteredCourses.length, previewEntries.length, rooms.length, totalWeeklyHours, uniqueTeachers],
   )
 
-  const proposalOptions = useMemo(() => {
-    if (optimizerProposals.length === 0) return []
-    return optimizerProposals.map((proposal) => {
-      const summary = proposal.summary ?? buildSummary(proposal.performance_metrics, proposal.unassigned, filteredCourses.length)
-      const fillRatePct = (summary.fill_rate ?? 0) * 100
-      const pendingCourses = summary.pending_courses ?? 0
-      const descriptionParts = [`Cobertura ${fillRatePct.toFixed(1)}%`]
-      if (pendingCourses > 0) {
-        descriptionParts.push(`${pendingCourses} pendiente${pendingCourses === 1 ? '' : 's'}`)
-      }
-      return {
-        value: proposal.algorithm,
-        label: `${proposal.algorithm} · ${summary.assigned_courses}/${summary.requested_courses} cursos`,
-        description: descriptionParts.join(' · '),
-      }
-    })
-  }, [optimizerProposals, buildSummary, filteredCourses.length])
-
   const buildTimeslotBlocks = useCallback(() => {
     const dayBuckets = new Map<number, Timeslot[]>()
     for (const slot of timeslots) {
@@ -597,6 +431,100 @@ export default function GlobalScheduleOptimizer() {
   }, [timeslots])
 
   const allTimeslotIds = useMemo(() => timeslots.map((slot) => slot.id), [timeslots])
+
+  const normalizeResponseProposals = useCallback(
+    (data: OptimizerResponse): OptimizerProposal[] => {
+      const base = data.proposals ?? []
+      if (base.length > 0) {
+        return base.map((item) => ({
+          strategy: item.strategy || 'Propuesta',
+          assignments: item.assignments ?? [],
+          unassigned: item.unassigned ?? [],
+          quality_metrics: item.quality_metrics,
+          performance_metrics: item.performance_metrics,
+          diagnostics: item.diagnostics,
+        }))
+      }
+      return [
+        {
+          strategy: data.selected_strategy || 'Mejor propuesta',
+          assignments: data.assignments ?? [],
+          unassigned: data.unassigned ?? [],
+          quality_metrics: data.quality_metrics,
+          performance_metrics: data.performance_metrics,
+          diagnostics: data.diagnostics,
+        },
+      ]
+    },
+    [],
+  )
+
+  const buildEntriesFromAssignments = useCallback(
+    (assignments: OptimizerAssignment[]) =>
+      assignments.map((assignment) => {
+        const course = courseMap.get(assignment.course_id)
+        const subjectName = course ? subjectMap.get(course.subject_id) : undefined
+        const semester = course?.program_semester_id != null ? semesterMap.get(course.program_semester_id) : undefined
+        const program = semester ? programMap.get(semester.program_id) : undefined
+        const teacher = course?.teacher_id != null ? teacherMap.get(course.teacher_id) : undefined
+        const teacherName = teacher?.user_id != null ? userMap.get(teacher.user_id) : undefined
+        const courseLabelParts: string[] = []
+        if (subjectName) courseLabelParts.push(subjectName)
+        if (course?.group) courseLabelParts.push(`Grupo ${course.group}`)
+        const courseLabel = courseLabelParts.length > 0 ? courseLabelParts.join(' · ') : `Curso #${assignment.course_id}`
+        const semesterLabel = semester?.label || (semester?.semester_number != null ? `Semestre ${semester.semester_number}` : undefined)
+        const timeslot = timeslotMap.get(assignment.timeslot_id)
+        const room = roomMap.get(assignment.room_id)
+        const slotStart = timeslot ? timeStringToMinutes(timeslot.start_time) : null
+        const durationMinutes = assignment.duration_minutes ?? (timeslot ? durationBetween(timeslot.start_time, timeslot.end_time) : 0)
+        const offset = assignment.start_offset_minutes ?? 0
+        const startLabel = minutesToTimeString(slotStart != null ? slotStart + offset : null) || (timeslot ? timeslot.start_time.slice(0, 5) : undefined)
+        const endLabel = minutesToTimeString(slotStart != null ? slotStart + offset + durationMinutes : null) || (timeslot ? timeslot.end_time.slice(0, 5) : undefined)
+        return {
+          course_id: assignment.course_id,
+          course_name: courseLabel,
+          subject_name: subjectName,
+          room_id: assignment.room_id,
+          room_code: room?.code,
+          timeslot_id: assignment.timeslot_id,
+          day_of_week: timeslot?.day_of_week,
+          start_time: startLabel ?? undefined,
+          end_time: endLabel ?? undefined,
+          duration_minutes: durationMinutes,
+          start_offset_minutes: assignment.start_offset_minutes ?? 0,
+          teacher_name: teacherName,
+          program_id: program?.id ?? null,
+          program_semester_id: semester?.id ?? null,
+          program_semester_label: semesterLabel ?? undefined,
+        }
+      }),
+    [courseMap, programMap, roomMap, semesterMap, subjectMap, teacherMap, timeslotMap, userMap],
+  )
+
+  const applyProposalSelection = useCallback(
+    (proposal: OptimizerProposal | null) => {
+      if (!proposal) {
+        setSelectedStrategy(null)
+        setOptimizerAssignments([])
+        setPreviewEntries([])
+        setUnassigned([])
+        setQualityMetrics(null)
+        setPerformanceMetrics(null)
+        setDiagnostics(null)
+        return
+      }
+
+      const entries = buildEntriesFromAssignments(proposal.assignments)
+      setSelectedStrategy(proposal.strategy)
+      setOptimizerAssignments(proposal.assignments)
+      setPreviewEntries(entries)
+      setUnassigned(proposal.unassigned ?? [])
+      setQualityMetrics(proposal.quality_metrics ?? null)
+      setPerformanceMetrics(proposal.performance_metrics ?? null)
+      setDiagnostics(proposal.diagnostics ?? null)
+    },
+    [buildEntriesFromAssignments],
+  )
 
   const runOptimizer = useCallback(async () => {
     if (filteredCourses.length === 0) {
@@ -654,30 +582,23 @@ export default function GlobalScheduleOptimizer() {
       }
 
       const { data } = await api.post<OptimizerResponse>('/schedule/optimize', payload)
-      const proposals = normalizeProposals(data, filteredCourses.length)
-      if (proposals.length === 0) {
-        setOptimizerProposals([])
-        setSelectedProposalKey(null)
-        setSuccess('El optimizador no entregó propuestas válidas.')
-        return
-      }
 
-      setOptimizerProposals(proposals)
-      const preferredKey = data.recommended_algorithm && proposals.some((proposal) => proposal.algorithm === data.recommended_algorithm)
-        ? data.recommended_algorithm
-        : proposals[0].algorithm
-      setSelectedProposalKey(preferredKey)
+      const normalizedProposals = normalizeResponseProposals(data)
+      setProposals(normalizedProposals)
+      const initialProposal = normalizedProposals.find((item) => item.strategy === data.selected_strategy) ?? normalizedProposals[0] ?? null
+      applyProposalSelection(initialProposal)
 
-      const recommendedProposal = proposals.find((proposal) => proposal.algorithm === preferredKey) ?? proposals[0]
-      const assignmentCount = recommendedProposal.assignments?.length ?? 0
-      const pendingList = recommendedProposal.unassigned ?? []
-      if (pendingList.length > 0) {
-        const pendingLabel = pendingList.length === 1 ? 'curso' : 'cursos'
-        const pendingVerb = pendingList.length === 1 ? 'sigue' : 'siguen'
-        setSuccess(`Optimizador global · ${recommendedProposal.algorithm}: ${assignmentCount} bloques sugeridos. ${pendingList.length} ${pendingLabel} ${pendingVerb} pendientes.`)
+      const assignmentCount = initialProposal?.assignments?.length ?? 0
+      const assignmentLabel = assignmentCount === 1 ? 'bloque' : 'bloques'
+      const assignmentSuffix = assignmentCount === 1 ? 'sugerido' : 'sugeridos'
+      const readySuffix = assignmentCount === 1 ? 'listo' : 'listos'
+      const pendingCount = initialProposal?.unassigned?.length ?? 0
+      if (pendingCount > 0) {
+        const pendingLabel = pendingCount === 1 ? 'curso' : 'cursos'
+        const pendingVerb = pendingCount === 1 ? 'sigue' : 'siguen'
+        setSuccess(`Optimizador global: ${assignmentCount} ${assignmentLabel} ${assignmentSuffix}. ${pendingCount} ${pendingLabel} ${pendingVerb} pendientes.`)
       } else {
-        const assignmentLabel = assignmentCount === 1 ? 'bloque sugerido' : 'bloques sugeridos'
-        setSuccess(`Optimizador global · ${recommendedProposal.algorithm}: ${assignmentCount} ${assignmentLabel} listos para revisión.`)
+        setSuccess(`Optimizador global: ${assignmentCount} ${assignmentLabel} ${assignmentSuffix} ${readySuffix} para revisión.`)
       }
     } catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || 'No se pudo ejecutar el optimizador global'
@@ -685,8 +606,8 @@ export default function GlobalScheduleOptimizer() {
       setOptimizerAssignments([])
       setPreviewEntries([])
       setUnassigned([])
-      setOptimizerProposals([])
-      setSelectedProposalKey(null)
+      setProposals([])
+      setSelectedStrategy(null)
     } finally {
       setOptimizerLoading(false)
     }
@@ -697,7 +618,8 @@ export default function GlobalScheduleOptimizer() {
     maxDailyHours,
     rooms,
     timeslots,
-    normalizeProposals,
+    normalizeResponseProposals,
+    applyProposalSelection,
   ])
 
   const previewStructure = useMemo<ProgramPreview[]>(() => {
@@ -782,6 +704,25 @@ export default function GlobalScheduleOptimizer() {
       .sort((a, b) => b.count - a.count)
   }, [diagnostics])
 
+  const proposalOptions = useMemo(
+    () =>
+      proposals.map((proposal) => {
+        const assigned = proposal.performance_metrics?.assigned_courses ?? proposal.assignments.length
+        const requested = proposal.performance_metrics?.requested_courses
+        const coverageLabel = requested ? `${assigned}/${requested} cursos` : `${assigned} cursos`
+        return { value: proposal.strategy, label: `${proposal.strategy} · ${coverageLabel}` }
+      }),
+    [proposals],
+  )
+
+  useEffect(() => {
+    if (proposals.length === 0) return
+    const exists = proposals.some((proposal) => proposal.strategy === selectedStrategy)
+    if (!exists) {
+      applyProposalSelection(proposals[0])
+    }
+  }, [applyProposalSelection, proposals, selectedStrategy])
+
   const formatCauseCountLabel = (count: number) => (count === 1 ? '1 curso' : `${count} cursos`)
 
   const runDisabled = optimizerLoading || loading || filteredCourses.length === 0 || rooms.length === 0 || timeslots.length === 0
@@ -812,8 +753,6 @@ export default function GlobalScheduleOptimizer() {
       setSuccess('Propuesta global aplicada y publicada en el horario institucional.')
       setPreviewEntries([])
       setOptimizerAssignments([])
-      setOptimizerProposals([])
-      setSelectedProposalKey(null)
       setUnassigned([])
       setQualityMetrics(null)
       setPerformanceMetrics(null)
@@ -825,6 +764,14 @@ export default function GlobalScheduleOptimizer() {
       setSaving(false)
     }
   }, [optimizerAssignments])
+
+  const handleProposalChange = useCallback(
+    (value: string | null) => {
+      const target = proposals.find((proposal) => proposal.strategy === value) ?? null
+      applyProposalSelection(target)
+    },
+    [applyProposalSelection, proposals],
+  )
 
   const metricsEntries = useMemo(() => {
     if (!qualityMetrics) return []
@@ -988,6 +935,17 @@ export default function GlobalScheduleOptimizer() {
             disabled={loading}
             maw={260}
           />
+
+          {proposals.length > 0 ? (
+            <Select
+              label="Propuesta generada"
+              placeholder="Selecciona la estrategia"
+              data={proposalOptions}
+              value={selectedStrategy}
+              onChange={handleProposalChange}
+              maw={360}
+            />
+          ) : null}
         </Stack>
       </Card>
 

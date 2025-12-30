@@ -275,7 +275,8 @@ describe('Admin CRUD básico', () => {
     expect(introButton).toBeInTheDocument()
     await userEvent.click(introButton)
 
-    await screen.findByText('Introducción al optimizador')
+    const introHeading = await screen.findByRole('heading', { name: 'Introducción al optimizador' })
+    expect(introHeading).toBeInTheDocument()
     expect(await screen.findByText('Diseña la estructura académica')).toBeInTheDocument()
   })
 
